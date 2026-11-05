@@ -1,0 +1,181 @@
+{
+  "name": "second",
+  "slug": "second",
+  "framework": "autogen",
+  "framework_label": "AutoGen",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "input",
+      "name": "input_1",
+      "label": "输入",
+      "description": "每个智能体必须有的入口方块，接收用户输入。",
+      "file": "input_1.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输入  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"输入 —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 0.0,
+        "y": 11.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n2",
+      "kind": "agent",
+      "name": "agent_2",
+      "label": "生成",
+      "description": "自主 Agent，可选 ReAct / Plan / Goal 等推理模式；连到它的 tool 子图会自动注入工具。",
+      "file": "agent_2.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "mode": "simple",
+        "system": "",
+        "max_steps": 6
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：生成  (agent_2)  类型：agent\n# ═══════════════════════════════════════════════════════════════\n\ndef agent_2(state: AgentState) -> dict:\n    \"\"\"生成 —— 推理模式：simple，最多 6 步。\"\"\"\n    task = state.get(\"data\", \"\")\n    origin = state.get(\"user_input\", \"\")\n    if origin and origin != task:\n        task = f\"{origin}\\n\\n## 上一轮观察 / 反馈\\n{task}\\n\\n请结合原始问题作答。\"\n    agent = create_agent(\n        model=llm,\n        tools=TOOLS,\n        system_prompt=\"你是一个能调用工具的智能体。回答前先想清楚需要哪些信息，必要时调用工具，最后给出最终答案。\",\n    )\n    try:\n        answer = _agent_stream(agent, task, \"n2\", \"agent_2\",\n                               14)\n    except Exception:  # noqa: BLE001\n        result = agent.invoke(\n            {\"messages\": [{\"role\": \"user\", \"content\": task}]},\n            config={\"recursion_limit\": 14},\n        )\n        messages = result.get(\"messages\") or []\n        answer = str(getattr(messages[-1], \"content\", \"\")) if messages else \"\"\n    return {\"data\": answer, \"answer\": answer}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"自主 Agent：按节点属性里选定的推理模式执行。\n\n    模式：react / plan_execute / goal / reflexion / tool_call / simple。\n    画布中「连到本节点输入」的 tool 子图会自动注入 ctx.tools。\n    如果这个 agent 配了下级，可以用 ctx.delegate(名字, 任务) 把活派出去。\n    \"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个能自主使用工具的智能体。\"\n    return ctx.agent(\n        task=ctx.text,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 6),\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 573.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n3",
+      "kind": "critic",
+      "name": "critic_3",
+      "label": "评审",
+      "description": "按维度打分并给改进项。",
+      "file": "critic_3.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：评审  (critic_3)  类型：critic\n# ═══════════════════════════════════════════════════════════════\n\ndef critic_3(state: AgentState) -> dict:\n    \"\"\"按维度打分并给改进项。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = llm.invoke(f\"按维度打分并给改进项。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"评审：按评分标准打分并给出意见。\"\"\"\n    return ctx.json_prompt(\n        \"评审以下产出，按维度打分并列出改进项。\",\n        schema={\"score\": 0, \"dimensions\": {\"accuracy\": 0, \"completeness\": 0, \"clarity\": 0},\n                \"issues\": [\"...\"], \"verdict\": \"pass|revise\"},\n        context=ctx.text,\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 1146.0,
+        "y": 11.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n4",
+      "kind": "condition",
+      "name": "condition_4",
+      "label": "还需要改吗",
+      "description": "用表达式判定 true/false 两条出边。",
+      "file": "condition_4.py",
+      "outputs": [
+        "true",
+        "false"
+      ],
+      "params": {
+        "expr": "len(ctx.text) > 0",
+        "expression": "issues > 0"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：还需要改吗  (condition_4)  类型：condition\n# ═══════════════════════════════════════════════════════════════\n\ndef condition_4(state: AgentState) -> dict:\n    \"\"\"还需要改吗 —— 按判别问题决定走 true 还是 false。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    question = \"issues > 0\"\n    verdict = llm.bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"你只输出 true 或 false，不要解释。\"},\n        {\"role\": \"user\", \"content\": f\"判别问题：{question}\\n\\n待判内容：\\n{text}\\n\\n只回答 true 或 false。\"},\n    ]).content.strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(state.get(\"loop_count\") or 0) + 1\n    max_loops = 0\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n4\", \"name\": \"condition_4\",\n               \"message\": f\"已到循环上限 {max_loops} 次，强制收敛\"})\n    _emit({\"event\": \"route\", \"node\": \"n4\", \"name\": \"condition_4\",\n           \"branch\": branch, \"reason\": _brief(verdict, 120)})\n    return {\"data\": text, \"route\": branch, \"loop_count\": rounds}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件判断：返回 \"true\" 或 \"false\"。\"\"\"\n    expr = ctx.params.get(\"expr\", \"len(ctx.text) > 0\")\n    try:\n        ok = bool(eval(expr, {\"__builtins__\": {}}, {\"ctx\": ctx, \"text\": ctx.text}))\n    except Exception as exc:  # noqa: BLE001\n        ctx.log(f\"条件求值失败，默认走 false：{exc}\")\n        ok = False\n    return \"true\" if ok else \"false\"\n",
+      "code_touched": false,
+      "position": {
+        "x": 1719.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n5",
+      "kind": "output",
+      "name": "output_5",
+      "label": "输出",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_5.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "source": "auto"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出  (output_5)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_5(state: AgentState) -> dict:\n    \"\"\"输出 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 2292.0,
+        "y": 11.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true"
+    },
+    {
+      "source": "n4",
+      "target": "n2",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false"
+    }
+  ],
+  "max_visits": 8
+}
