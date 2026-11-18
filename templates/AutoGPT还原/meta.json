@@ -1,0 +1,28 @@
+{
+  "slug": "AutoGPT还原",
+  "name": "AutoGPT还原",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "langchain",
+  "mode": "",
+  "node_count": 9,
+  "created_at": "2026-11-18T09:08:05+00:00",
+  "canvas_id": "ffd03a013510493b9eda84b4d9a99d89",
+  "canvas_updated_at": "2026-11-18T08:50:33+00:00",
+  "graph_hash": "3cf26f73f67dda2e",
+  "rev": 1,
+  "updated_at": "2026-11-18T09:08:06+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
