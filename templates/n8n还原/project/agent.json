@@ -1,0 +1,249 @@
+{
+  "name": "n8n还原",
+  "slug": "n8n还原",
+  "framework": "langchain",
+  "framework_label": "LangChain / LangGraph",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "input",
+      "name": "input_1",
+      "label": "触发器",
+      "description": "每个智能体必须有的入口方块，接收用户输入。",
+      "file": "input_1.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 60.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n2",
+      "kind": "http_request",
+      "name": "http_request_2",
+      "label": "调用接口",
+      "description": "调用外部 REST 接口。",
+      "file": "http_request_2.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "url": "https://httpbin.org/get",
+        "method": "GET"
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+      "code_touched": false,
+      "position": {
+        "x": 356.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n3",
+      "kind": "condition",
+      "name": "condition_3",
+      "label": "条件判断",
+      "description": "用表达式判定 true/false 两条出边。",
+      "file": "condition_3.py",
+      "outputs": [
+        "true",
+        "false"
+      ],
+      "params": {
+        "expr": "len(ctx.text) > 0",
+        "expression": "state.get('status') == 200"
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件判断：返回 \"true\" 或 \"false\"。\"\"\"\n    expr = ctx.params.get(\"expr\", \"len(ctx.text) > 0\")\n    try:\n        ok = bool(eval(expr, {\"__builtins__\": {}}, {\"ctx\": ctx, \"text\": ctx.text}))\n    except Exception as exc:  # noqa: BLE001\n        ctx.log(f\"条件求值失败，默认走 false：{exc}\")\n        ok = False\n    return \"true\" if ok else \"false\"\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件判断：返回 \"true\" 或 \"false\"。\"\"\"\n    expr = ctx.params.get(\"expr\", \"len(ctx.text) > 0\")\n    try:\n        ok = bool(eval(expr, {\"__builtins__\": {}}, {\"ctx\": ctx, \"text\": ctx.text}))\n    except Exception as exc:  # noqa: BLE001\n        ctx.log(f\"条件求值失败，默认走 false：{exc}\")\n        ok = False\n    return \"true\" if ok else \"false\"\n",
+      "code_touched": false,
+      "position": {
+        "x": 652.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n4",
+      "kind": "formatter",
+      "name": "formatter_4",
+      "label": "数据整形",
+      "description": "整理成 markdown / json / 表格。",
+      "file": "formatter_4.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "format": "markdown"
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"格式化：把结果整理成指定格式（markdown / json / table）。\"\"\"\n    fmt = ctx.params.get(\"format\", \"markdown\")\n    return ctx.llm(\n        f\"把下面内容转成 {fmt} 格式，只输出结果本身：\\n{ctx.text}\",\n        system=\"你是格式化工具，不做内容增删。\",\n    )\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"格式化：把结果整理成指定格式（markdown / json / table）。\"\"\"\n    fmt = ctx.params.get(\"format\", \"markdown\")\n    return ctx.llm(\n        f\"把下面内容转成 {fmt} 格式，只输出结果本身：\\n{ctx.text}\",\n        system=\"你是格式化工具，不做内容增删。\",\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 948.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n5",
+      "kind": "http_request",
+      "name": "http_request_5",
+      "label": "通知/写回",
+      "description": "调用外部 REST 接口。",
+      "file": "http_request_5.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "url": "https://httpbin.org/get",
+        "method": "GET"
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+      "code_touched": false,
+      "position": {
+        "x": 1216.0,
+        "y": 48.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n6",
+      "kind": "error_handler",
+      "name": "error_handler_6",
+      "label": "失败处理",
+      "description": "捕获上游异常并给出修复方案。",
+      "file": "error_handler_6.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"错误处理：捕获上游异常并给出兜底动作。\"\"\"\n    err = ctx.state.get(\"last_error\")\n    if not err:\n        return ctx.text\n    ctx.log(f\"捕获错误：{err}\")\n    return ctx.llm(\n        f\"执行出错：{err}\\n原始输入：{ctx.text}\\n请给出修复步骤或替代方案。\",\n        system=\"你是故障排查专家。\",\n    )\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"错误处理：捕获上游异常并给出兜底动作。\"\"\"\n    err = ctx.state.get(\"last_error\")\n    if not err:\n        return ctx.text\n    ctx.log(f\"捕获错误：{err}\")\n    return ctx.llm(\n        f\"执行出错：{err}\\n原始输入：{ctx.text}\\n请给出修复步骤或替代方案。\",\n        system=\"你是故障排查专家。\",\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 948.0,
+        "y": 238.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n7",
+      "kind": "output",
+      "name": "output_7",
+      "label": "结束",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_7.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "source": "auto"
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 1616.0,
+        "y": 176.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true"
+    },
+    {
+      "source": "n3",
+      "target": "n6",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false"
+    },
+    {
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n5",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n6",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    }
+  ],
+  "max_visits": 8
+}
