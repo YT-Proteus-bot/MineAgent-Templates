@@ -1,0 +1,477 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 60.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "用户输入",
+        "name": "input_1",
+        "description": "每个智能体必须有的入口方块，接收用户输入。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 636.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "skill",
+        "label": "技能清单",
+        "name": "skill_2",
+        "description": "贴入 skill.md 全文，或填写 skills/ 下的文件名。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"技能节点。\n\n    两种用法：\n    1) params.skill_file = \"report_writer.md\"  → 读取项目 skills/ 下的技能文件\n    2) 直接在本文件里写 SKILL_TEXT（粘贴 skill.md 全文）\n    \"\"\"\n    body = ctx.skill(\n        name=ctx.params.get(\"skill_file\", \"\"),\n        inline=ctx.params.get(\"skill_text\", \"\"),\n    )\n    if ctx.params.get(\"pass_through\"):\n        return {\"skill\": body, \"text\": ctx.text}\n    return ctx.llm(\n        f\"# 技能说明\\n{body}\\n\\n# 用户输入\\n{ctx.text}\\n\\n请按技能说明完成任务。\",\n        system=\"严格遵循技能说明的执行步骤。\",\n    )\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"技能节点。\n\n    两种用法：\n    1) params.skill_file = \"report_writer.md\"  → 读取项目 skills/ 下的技能文件\n    2) 直接在本文件里写 SKILL_TEXT（粘贴 skill.md 全文）\n    \"\"\"\n    body = ctx.skill(\n        name=ctx.params.get(\"skill_file\", \"\"),\n        inline=ctx.params.get(\"skill_text\", \"\"),\n    )\n    if ctx.params.get(\"pass_through\"):\n        return {\"skill\": body, \"text\": ctx.text}\n    return ctx.llm(\n        f\"# 技能说明\\n{body}\\n\\n# 用户输入\\n{ctx.text}\\n\\n请按技能说明完成任务。\",\n        system=\"严格遵循技能说明的执行步骤。\",\n    )\n",
+        "language": "markdown",
+        "params": {
+          "skill_file": "",
+          "skill_text": "",
+          "pass_through": false
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 1212.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "system_prompt",
+        "label": "系统提示词装配",
+        "name": "system_prompt_3",
+        "description": "注入角色设定，供下游 agent/llm 复用。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"写入系统提示词，供下游 agent/llm 复用。\"\"\"\n    persona = ctx.params.get(\"persona\") or \"你是资深行业专家，先给结论再给依据。\"\n    ctx.state[\"system_prompt\"] = persona\n    return ctx.text\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"写入系统提示词，供下游 agent/llm 复用。\"\"\"\n    persona = ctx.params.get(\"persona\") or \"你是资深行业专家，先给结论再给依据。\"\n    ctx.state[\"system_prompt\"] = persona\n    return ctx.text\n",
+        "language": "python",
+        "params": {
+          "persona": "",
+          "template": "你是 {{persona}}。\n\n{{instructions}}\n\n可用技能：{{skills}}\n\n当前环境：{{env}}"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 1788.0,
+        "y": 228.0
+      },
+      "data": {
+        "kind": "agent",
+        "label": "Agent 循环",
+        "name": "agent_4",
+        "description": "自主 Agent，可选 ReAct / Plan / Goal 等推理模式；连到它的 tool 子图会自动注入工具。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"自主 Agent：按节点属性里选定的推理模式执行。\n\n    模式：react / plan_execute / goal / reflexion / tool_call / simple。\n    画布中「连到本节点输入」的 tool 子图会自动注入 ctx.tools。\n    如果这个 agent 配了下级，可以用 ctx.delegate(名字, 任务) 把活派出去。\n    \"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个能自主使用工具的智能体。\"\n    return ctx.agent(\n        task=ctx.text,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 6),\n    )\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"自主 Agent：按节点属性里选定的推理模式执行。\n\n    模式：react / plan_execute / goal / reflexion / tool_call / simple。\n    画布中「连到本节点输入」的 tool 子图会自动注入 ctx.tools。\n    如果这个 agent 配了下级，可以用 ctx.delegate(名字, 任务) 把活派出去。\n    \"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个能自主使用工具的智能体。\"\n    return ctx.agent(\n        task=ctx.text,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 6),\n    )\n",
+        "language": "python",
+        "params": {
+          "mode": "react",
+          "system": "",
+          "max_steps": 12
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 2364.0,
+        "y": 227.0
+      },
+      "data": {
+        "kind": "router",
+        "label": "要调工具吗？",
+        "name": "router_5",
+        "description": "判断后走 true / false 两条出边，是分支与循环的枢纽。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件路由：返回 \"true\" 或 \"false\" 决定走哪条出边。\"\"\"\n    question = ctx.params.get(\"question\") or \"该请求是否需要调用工具？\"\n    verdict = ctx.llm(\n        f\"判别问题：{question}\\n待判内容：{ctx.text}\\n只回答 true 或 false。\",\n        system=\"你只输出 true 或 false，不要解释。\",\n    ).strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(ctx.state.get(\"loop_count\") or 0) + 1\n    max_loops = int(ctx.params.get(\"max_loops\", 0) or 0)\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        ctx.log(f\"已到循环上限 {max_loops} 次，强制收敛\", \"warn\")\n    ctx.state[\"loop_count\"] = rounds\n    ctx.emit(\"route\", {\"branch\": branch})\n    return branch\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件路由：返回 \"true\" 或 \"false\" 决定走哪条出边。\"\"\"\n    question = ctx.params.get(\"question\") or \"该请求是否需要调用工具？\"\n    verdict = ctx.llm(\n        f\"判别问题：{question}\\n待判内容：{ctx.text}\\n只回答 true 或 false。\",\n        system=\"你只输出 true 或 false，不要解释。\",\n    ).strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(ctx.state.get(\"loop_count\") or 0) + 1\n    max_loops = int(ctx.params.get(\"max_loops\", 0) or 0)\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        ctx.log(f\"已到循环上限 {max_loops} 次，强制收敛\", \"warn\")\n    ctx.state[\"loop_count\"] = rounds\n    ctx.emit(\"route\", {\"branch\": branch})\n    return branch\n",
+        "language": "python",
+        "params": {
+          "question": "根据当前对话判断：这一步是否需要调用工具？需要回答 true，可以直接作答回答 false。",
+          "max_loops": 12
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n6",
+      "type": "agent",
+      "position": {
+        "x": 2940.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "human_approval",
+        "label": "审批闸门",
+        "name": "human_approval_6",
+        "description": "关键动作前挂起整个 run，等 /resume 放行；approve 走 true 分支、reject 走 false 分支。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"人工审批：无交互环境下按 params.default 自动放行或拒绝。\"\"\"\n    decision = ctx.ask_human(ctx.text, default=ctx.params.get(\"default\", \"approve\"))\n    ctx.emit(\"approval\", {\"decision\": decision})\n    return {\"text\": ctx.text, \"approved\": decision == \"approve\"}\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"人工审批：无交互环境下按 params.default 自动放行或拒绝。\"\"\"\n    decision = ctx.ask_human(ctx.text, default=ctx.params.get(\"default\", \"approve\"))\n    ctx.emit(\"approval\", {\"decision\": decision})\n    return {\"text\": ctx.text, \"approved\": decision == \"approve\"}\n",
+        "language": "python",
+        "params": {
+          "default": "approve",
+          "policy": "危险操作（写文件 / 执行命令 / 发请求）需要人工确认"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n7",
+      "type": "agent",
+      "position": {
+        "x": 3516.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "guardrail",
+        "label": "沙箱与权限",
+        "name": "guardrail_7",
+        "description": "拦截敏感内容与越权动作。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"护栏：拦截敏感内容与越权动作。\"\"\"\n    text = ctx.text\n    banned = ctx.params.get(\"banned\", [\"rm -rf\", \"DROP TABLE\", \"sk-\"])\n    hit = [b for b in banned if b and b in text]\n    if hit:\n        ctx.emit(\"guardrail\", {\"blocked\": True, \"hit\": hit})\n        raise PermissionError(f\"护栏拦截：命中 {hit}\")\n    return text\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"护栏：拦截敏感内容与越权动作。\"\"\"\n    text = ctx.text\n    banned = ctx.params.get(\"banned\", [\"rm -rf\", \"DROP TABLE\", \"sk-\"])\n    hit = [b for b in banned if b and b in text]\n    if hit:\n        ctx.emit(\"guardrail\", {\"blocked\": True, \"hit\": hit})\n        raise PermissionError(f\"护栏拦截：命中 {hit}\")\n    return text\n",
+        "language": "python",
+        "params": {
+          "banned": [
+            "rm -rf",
+            "DROP TABLE"
+          ],
+          "rule": "命令在沙箱内执行；越权访问直接拒绝并回传原因"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n8",
+      "type": "agent",
+      "position": {
+        "x": 4092.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "tool",
+        "label": "工具执行",
+        "name": "tool_8",
+        "description": "工具节点：被 agent 节点调用时 kwargs 为模型给出的参数",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext, **kwargs):\n    \"\"\"工具节点：被 agent 节点调用时 kwargs 为模型给出的参数。\n\n    直接连在流程中时也会作为普通节点执行一次。\n    \"\"\"\n    query = kwargs.get(\"query\") or ctx.params.get(\"query\") or ctx.text\n    ctx.log(f\"tool 执行：{query}\")\n    # TODO: 在这里写真正的工具逻辑\n    return {\"tool\": ctx.params.get(\"name\", \"tool\"), \"query\": query, \"result\": \"\"}\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext, **kwargs):\n    \"\"\"工具节点：被 agent 节点调用时 kwargs 为模型给出的参数。\n\n    直接连在流程中时也会作为普通节点执行一次。\n    \"\"\"\n    query = kwargs.get(\"query\") or ctx.params.get(\"query\") or ctx.text\n    ctx.log(f\"tool 执行：{query}\")\n    # TODO: 在这里写真正的工具逻辑\n    return {\"tool\": ctx.params.get(\"name\", \"tool\"), \"query\": query, \"result\": \"\"}\n",
+        "language": "python",
+        "params": {
+          "preset": "",
+          "name": "tool",
+          "query": ""
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n9",
+      "type": "agent",
+      "position": {
+        "x": 4668.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "observation",
+        "label": "观察结果",
+        "name": "observation_9",
+        "description": "记录本轮动作的真实结果，是 Agent 循环的反馈入口。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"观察：记录本轮动作的真实结果（工具返回 / 环境反馈）。\"\"\"\n    obs = {\n        \"node\": ctx.node_name,\n        \"input\": ctx.input,\n        \"summary\": ctx.llm(\n            f\"把工具返回结果压缩成 3 条以内的观察要点：\\n{ctx.text}\",\n            system=\"只陈述事实，不推断。\",\n        ),\n        \"raw\": ctx.text,\n    }\n    ctx.state.setdefault(\"observations\", []).append(obs)\n    ctx.emit(\"observation\", {\"summary\": obs[\"summary\"]})\n    return obs\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"观察：记录本轮动作的真实结果（工具返回 / 环境反馈）。\"\"\"\n    obs = {\n        \"node\": ctx.node_name,\n        \"input\": ctx.input,\n        \"summary\": ctx.llm(\n            f\"把工具返回结果压缩成 3 条以内的观察要点：\\n{ctx.text}\",\n            system=\"只陈述事实，不推断。\",\n        ),\n        \"raw\": ctx.text,\n    }\n    ctx.state.setdefault(\"observations\", []).append(obs)\n    ctx.emit(\"observation\", {\"summary\": obs[\"summary\"]})\n    return obs\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n10",
+      "type": "agent",
+      "position": {
+        "x": 5244.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "summarizer",
+        "label": "上下文压缩",
+        "name": "summarizer_10",
+        "description": "按长度要求压缩内容。",
+        "code": "def run(ctx):\n    \"\"\"按预算压缩，而不是无脑截断：保住最近几轮 + 早期要点。\"\"\"\n    budget = int(ctx.params.get('max_chars') or 6000)\n    history = ctx.state.setdefault('transcript', [])\n    history.append(str(ctx.text))\n    joined = '\\n'.join(history)\n    if len(joined) <= budget:\n        return {'data': ctx.text}\n    # 超预算：前半段摘要、后半段原文\n    head, tail = joined[: len(joined) - budget // 2], joined[-budget // 2:]\n    digest = ctx.llm(f'把下面这段历史压缩成要点（保留结论、待办、关键事实）：\\n{head}')\n    ctx.state['transcript'] = [digest, tail]\n    ctx.emit('compacted', {'before': len(joined), 'after': len(digest) + len(tail)})\n    return {'data': f'【早期摘要】\\n{digest}\\n\\n【最近】\\n{tail}'}",
+        "code_touched": true,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"摘要：按目标长度压缩内容。\"\"\"\n    limit = ctx.params.get(\"max_chars\", 300)\n    return ctx.llm(f\"用不超过 {limit} 字概括要点：\\n{ctx.text}\", system=\"只输出摘要正文。\")\n",
+        "language": "python",
+        "params": {
+          "max_chars": 6000
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n11",
+      "type": "agent",
+      "position": {
+        "x": 2940.0,
+        "y": 416.0
+      },
+      "data": {
+        "kind": "memory",
+        "label": "会话持久化",
+        "name": "memory_11",
+        "description": "短期(state)与长期(SQLite)记忆读写。",
+        "code": "def run(ctx):\n    \"\"\"会话落盘：中断后能按同一份状态接着跑。\"\"\"\n    transcript = ctx.state.get('transcript') or []\n    ctx.write_file('session.jsonl',\n                   '\\n'.join(str(x)[:2000] for x in transcript))\n    return {'data': ctx.text}",
+        "code_touched": true,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"记忆：短期（state）与长期（SQLite）读写。\"\"\"\n    action = ctx.params.get(\"action\", \"write\")\n    key = ctx.params.get(\"key\", \"memory\")\n    if action == \"read\":\n        return ctx.recall(key, \"\")\n    ctx.remember(key, ctx.text, long_term=ctx.params.get(\"long_term\", True))\n    return ctx.text\n",
+        "language": "python",
+        "params": {
+          "action": "write",
+          "key": "memory",
+          "long_term": true
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n12",
+      "type": "agent",
+      "position": {
+        "x": 5820.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "最终回答",
+        "name": "output_12",
+        "description": "每个智能体必须有的出口方块，返回最终答案。",
+        "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {
+          "source": "auto"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1__n1__n2",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e2__n2__n3",
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e3__n3__n4",
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e4__n4__n5",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e5__n5__n6__true",
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true",
+      "data": {}
+    },
+    {
+      "id": "e6__n6__n7",
+      "source": "n6",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e7__n7__n8",
+      "source": "n7",
+      "target": "n8",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e8__n8__n9",
+      "source": "n8",
+      "target": "n9",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e9__n9__n10",
+      "source": "n9",
+      "target": "n10",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e10__n10__n4",
+      "source": "n10",
+      "target": "n4",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e11__n5__n11__false",
+      "source": "n5",
+      "target": "n11",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false",
+      "data": {}
+    },
+    {
+      "id": "e12__n11__n12",
+      "source": "n11",
+      "target": "n12",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    }
+  ],
+  "viewport": {
+    "x": -112.22000000000003,
+    "y": 284.32,
+    "zoom": 0.28
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {},
+  "framework": "harness",
+  "slug": "deepseek_harness"
+}
