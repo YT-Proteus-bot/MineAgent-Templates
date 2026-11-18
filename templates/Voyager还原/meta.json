@@ -1,0 +1,28 @@
+{
+  "slug": "Voyager还原",
+  "name": "Voyager还原",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "langchain",
+  "mode": "",
+  "node_count": 11,
+  "created_at": "2026-11-18T09:07:37+00:00",
+  "canvas_id": "9754a94476b245c59d36447cc8b65fbc",
+  "canvas_updated_at": "2026-11-18T08:56:50+00:00",
+  "graph_hash": "6a52efa9ace94adb",
+  "rev": 1,
+  "updated_at": "2026-11-18T09:07:38+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
