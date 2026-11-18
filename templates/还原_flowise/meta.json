@@ -1,0 +1,28 @@
+{
+  "slug": "还原_flowise",
+  "name": "还原_flowise",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "langchain",
+  "mode": "",
+  "node_count": 10,
+  "created_at": "2026-11-18T08:47:09+00:00",
+  "canvas_id": "0d3b8bc6f0b14b6ea2936b98032307ed",
+  "canvas_updated_at": "2026-11-18T08:32:15+00:00",
+  "graph_hash": "de08cf33507b99bd",
+  "rev": 1,
+  "updated_at": "2026-11-18T08:47:10+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
