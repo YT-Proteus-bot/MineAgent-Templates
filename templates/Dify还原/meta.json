@@ -1,0 +1,28 @@
+{
+  "slug": "Dify还原",
+  "name": "Dify还原",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "dify",
+  "mode": "",
+  "node_count": 6,
+  "created_at": "2026-11-18T09:07:11+00:00",
+  "canvas_id": "4609a1be3c3f4a3eadb9fd4fda923f99",
+  "canvas_updated_at": "2026-11-18T09:03:46+00:00",
+  "graph_hash": "0898fd2b7152d483",
+  "rev": 1,
+  "updated_at": "2026-11-18T09:07:13+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
