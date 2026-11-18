@@ -1,0 +1,235 @@
+{
+  "name": "开源 · Flowise 可视化 RAG",
+  "slug": "开源_·_Flowise_可视化_RAG",
+  "framework": "custom",
+  "framework_label": "空白画布",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "input",
+      "name": "input_1",
+      "label": "文档 / 提问",
+      "description": "每个智能体必须有的入口方块，接收用户输入。",
+      "file": "input_1.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：文档 / 提问  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"文档 / 提问 —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n2",
+      "kind": "doc_loader",
+      "name": "doc_loader_2",
+      "label": "文档加载",
+      "description": "把 pdf / docx / md / csv 抽成纯文本。",
+      "file": "doc_loader_2.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：文档加载  (doc_loader_2)  类型：doc_loader\n# ═══════════════════════════════════════════════════════════════\n\ndef doc_loader_2(state: AgentState) -> dict:\n    \"\"\"文档加载 —— 把文本类文档读成纯文本。\"\"\"\n    from pathlib import Path as _Path\n    raw_path = \"\" or str(state.get(\"data\", \"\")).strip()\n    if not raw_path:\n        raise ValueError(\"doc_loader 需要文件路径（参数 path 或输入内容）\")\n    path = _Path(raw_path)\n    if not path.is_absolute():\n        path = _Path(__file__).resolve().parent / path\n    # 输入不是可读文件时，把它当成已经加载好的正文，链路照样能往下走\n    if not path.exists():\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n2\",\n               \"name\": \"doc_loader_2\", \"message\": \"输入不是文件，按正文处理\"})\n        return {\"data\": raw_path, \"source\": \"inline\"}\n    suffix = path.suffix.lower()\n    if suffix == \".pdf\":\n        try:\n            from pypdf import PdfReader\n        except ImportError as exc:\n            raise RuntimeError(\"读 PDF 需要 pypdf：pip install pypdf\") from exc\n        text = \"\\n\".join((pg.extract_text() or \"\") for pg in PdfReader(str(path)).pages)\n    elif suffix == \".docx\":\n        try:\n            import docx\n        except ImportError as exc:\n            raise RuntimeError(\"读 docx 需要 python-docx：pip install python-docx\") from exc\n        text = \"\\n\".join(p_.text for p_ in docx.Document(str(path)).paragraphs)\n    else:\n        text = path.read_text(encoding=\"utf-8\", errors=\"replace\")\n    _emit({\"event\": \"log\", \"node\": \"n2\", \"name\": \"doc_loader_2\",\n           \"message\": f\"已读取 {path.name}，{len(text)} 字符\"})\n    return {\"data\": text, \"source\": str(path.name)}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"文档加载：把 pdf / docx / md / txt / csv 抽成纯文本。\"\"\"\n    path = ctx.params.get(\"path\") or ctx.text.strip()\n    if not path:\n        raise ValueError(\"doc_loader 需要指定文件路径（可写在参数 path 里）\")\n    return ctx.load_document(path)\n",
+      "code_touched": false,
+      "position": {
+        "x": 380.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n3",
+      "kind": "text_splitter",
+      "name": "text_splitter_3",
+      "label": "文本切分",
+      "description": "按段落和长度切块，支持重叠。",
+      "file": "text_splitter_3.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "chunk_size": 600,
+        "overlap": 80
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：文本切分  (text_splitter_3)  类型：text_splitter\n# ═══════════════════════════════════════════════════════════════\n\ndef text_splitter_3(state: AgentState) -> dict:\n    \"\"\"文本切分 —— 按段落切块，带重叠。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    size, overlap_chars = 600, 80\n    step = max(1, size - overlap_chars)\n    chunks = [text[i:i + size] for i in range(0, len(text), step)] if text else []\n    chunks = [c.strip() for c in chunks if c.strip()]\n    _emit({\"event\": \"log\", \"node\": \"n3\", \"name\": \"text_splitter_3\",\n           \"message\": f\"切成 {len(chunks)} 块\"})\n    return {\"data\": chunks, \"chunk_count\": len(chunks)}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"文本切分：按段落 + 长度切块，带重叠。\"\"\"\n    size = int(ctx.params.get(\"chunk_size\", 600))\n    overlap = int(ctx.params.get(\"overlap\", 80))\n    chunks = ctx.split_text(ctx.text, size, overlap)\n    ctx.emit(\"chunks\", {\"count\": len(chunks), \"size\": size})\n    return chunks\n",
+      "code_touched": false,
+      "position": {
+        "x": 760.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n4",
+      "kind": "vector_indexer",
+      "name": "vector_indexer_4",
+      "label": "向量入库",
+      "description": "把文本块写进画布配置的向量库（未配置则写内置 SQLite）。",
+      "file": "vector_indexer_4.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：向量入库  (vector_indexer_4)  类型：vector_indexer\n# ═══════════════════════════════════════════════════════════════\n\ndef vector_indexer_4(state: AgentState) -> dict:\n    \"\"\"向量入库 —— 写进 config.json 里配置的向量库。\"\"\"\n    from runtime_sdk import project_vector_upsert\n    from runtime_sdk import project_use_collection\n    data = state.get(\"data\")\n    # 上游直接给向量说明接线错了：入库要接在文本后面\n    if isinstance(data, list) and data and all(isinstance(x, (int, float)) for x in data):\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n4\", \"name\": \"vector_indexer_4\",\n               \"message\": \"上游是向量而不是文本：vector_indexer 应接在文本节点后面\"})\n        return {\"data\": data, \"indexed\": 0, \"skipped\": \"vector_input\"}\n    if isinstance(data, list) and data and all(isinstance(x, str) for x in data):\n        chunks = data\n    else:\n        chunks = [str(data or \"\")]\n    chunks = [c for c in chunks if str(c).strip()]\n    for chunk in chunks:\n        project_vector_upsert(str(chunk), {\"node\": \"vector_indexer_4\"})\n    _emit({\"event\": \"log\", \"node\": \"n4\", \"name\": \"vector_indexer_4\",\n           \"message\": f\"入库 {len(chunks)} 块\"})\n    return {\"data\": str(data or \"\"), \"text\": str(data or \"\"),\n             \"indexed\": len(chunks)}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"向量入库：把文本块写进项目内的向量库。\"\"\"\n    chunks = ctx.input if isinstance(ctx.input, list) else [ctx.text]\n    count = 0\n    for chunk in chunks:\n        text = chunk if isinstance(chunk, str) else str(chunk)\n        if text.strip():\n            ctx.vector_upsert(text)\n            count += 1\n    ctx.emit(\"indexed\", {\"count\": count})\n    return {\"indexed\": count}\n",
+      "code_touched": false,
+      "position": {
+        "x": 1140.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n5",
+      "kind": "hybrid_retriever",
+      "name": "hybrid_retriever_5",
+      "label": "混合检索",
+      "description": "向量召回 + 关键词召回各取一份。",
+      "file": "hybrid_retriever_5.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "top_k": 4
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：混合检索  (hybrid_retriever_5)  类型：hybrid_retriever\n# ═══════════════════════════════════════════════════════════════\n\ndef hybrid_retriever_5(state: AgentState) -> dict:\n    \"\"\"混合检索 —— 向量库召回 + 文件关键词召回。\"\"\"\n    from runtime_sdk import project_retrieve, project_vector_search\n    query = str(state.get(\"data\", \"\"))\n    hits = project_vector_search(query, top_k=4, where=None)\n    keywords = project_retrieve(query, top_k=4, mode=\"keyword\")\n    _emit({\"event\": \"retrieval\", \"node\": \"n5\", \"name\": \"hybrid_retriever_5\",\n           \"vector\": len(hits), \"keyword\": len(keywords)})\n    return {\"data\": hits or keywords, \"query\": query,\n             \"vector\": hits, \"keyword\": keywords}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"混合检索：向量库召回 + 文件关键词召回各取一份。\"\"\"\n    top_k = int(ctx.params.get(\"top_k\", 4))\n    query = ctx.state.get(\"query\") or ctx.text\n    vec = ctx.vector_search(query, top_k=top_k)\n    kw = ctx.retrieve(query, top_k=top_k, mode=\"keyword\")\n    ctx.emit(\"hybrid\", {\"vector\": len(vec), \"keyword\": len(kw)})\n    return {\"query\": query, \"vector\": vec, \"keyword\": kw}\n",
+      "code_touched": false,
+      "position": {
+        "x": 1520.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n6",
+      "kind": "llm",
+      "name": "llm_6",
+      "label": "生成回答",
+      "description": "一次大模型调用，最基础的推理单元。",
+      "file": "llm_6.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "system": "只根据检索到的内容回答。"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：生成回答  (llm_6)  类型：llm\n# ═══════════════════════════════════════════════════════════════\n\nLLM_6_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"只根据检索到的内容回答。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef llm_6(state: AgentState) -> dict:\n    \"\"\"生成回答\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, LLM_6_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n6\", \"llm_6\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"单次大模型推理。\"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个严谨的助手，回答要准确、可执行。\"\n    return ctx.llm(ctx.text, system=system)\n",
+      "code_touched": false,
+      "position": {
+        "x": 1900.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n7",
+      "kind": "output",
+      "name": "output_7",
+      "label": "输出",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_7.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出  (output_7)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_7(state: AgentState) -> dict:\n    \"\"\"输出 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 2280.0,
+        "y": 0.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n6",
+      "target": "n7",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    }
+  ],
+  "max_visits": 8
+}
