@@ -1,0 +1,197 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 60.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "输入变量",
+        "name": "input_1",
+        "description": "每个智能体必须有的入口方块，接收用户输入。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输入变量  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"输入变量 —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 443.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "prompt",
+        "label": "Prompt 模板",
+        "name": "prompt_2",
+        "description": "把上游内容套进模板，做提示词工程。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：Prompt 模板  (prompt_2)  类型：prompt\n# ═══════════════════════════════════════════════════════════════\n\ndef prompt_2(state: AgentState) -> dict:\n    \"\"\"把上游内容套进模板，做提示词工程。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = _active_llm().invoke(f\"把上游内容套进模板，做提示词工程。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\nTEMPLATE = ctx_params = \"\"\"请基于以下内容完成任务。\n\n---\n{input}\n---\n\n要求：{requirement}\n\"\"\"\n\n\ndef run(ctx: NodeContext):\n    \"\"\"提示词模板：用 {{input}} 之外的字段做拼接。\"\"\"\n    requirement = ctx.params.get(\"requirement\", \"条理清晰，给出可执行步骤\")\n    return TEMPLATE.format(input=ctx.text, requirement=requirement)\n",
+        "language": "python",
+        "params": {
+          "requirement": "",
+          "template": "请基于以下信息回答：\n{context}\n\n问题：{question}"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 826.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "llm",
+        "label": "模型",
+        "name": "llm_3",
+        "description": "一次大模型调用，最基础的推理单元。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：模型  (llm_3)  类型：llm\n# ═══════════════════════════════════════════════════════════════\n\nLLM_3_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"一次大模型调用，最基础的推理单元。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef llm_3(state: AgentState) -> dict:\n    \"\"\"模型\"\"\"\n    model = _active_llm().bind(temperature=0.3)\n    text = _stream(model, LLM_3_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n3\", \"llm_3\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"单次大模型推理。\"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个严谨的助手，回答要准确、可执行。\"\n    return ctx.llm(ctx.text, system=system)\n",
+        "language": "python",
+        "params": {
+          "system": ""
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 1209.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "formatter",
+        "label": "输出解析",
+        "name": "formatter_4",
+        "description": "整理成 markdown / json / 表格。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出解析  (formatter_4)  类型：formatter\n# ═══════════════════════════════════════════════════════════════\n\nFORMATTER_4_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"你是格式化工具：把输入原样输出，最多调整 Markdown 结构；不得增删内容、不得添加解释或判断。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef formatter_4(state: AgentState) -> dict:\n    \"\"\"输出解析\"\"\"\n    model = _active_llm().bind(temperature=0.3)\n    text = _stream(model, FORMATTER_4_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n4\", \"formatter_4\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"格式化：把结果整理成指定格式（markdown / json / table）。\"\"\"\n    fmt = ctx.params.get(\"format\", \"markdown\")\n    return ctx.llm(\n        f\"把下面内容转成 {fmt} 格式，只输出结果本身：\\n{ctx.text}\",\n        system=\"你是格式化工具，不做内容增删。\",\n    )\n",
+        "language": "python",
+        "params": {
+          "format": "markdown"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 1592.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "结构化结果",
+        "name": "output_5",
+        "description": "每个智能体必须有的出口方块，返回最终答案。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：结构化结果  (output_5)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_5(state: AgentState) -> dict:\n    \"\"\"结构化结果 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {
+          "source": "auto"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1__n1__n2",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e2__n2__n3",
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e3__n3__n4",
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e4__n4__n5",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    }
+  ],
+  "viewport": {
+    "x": 58.52957746478876,
+    "y": 282.8194366197183,
+    "zoom": 0.7245070422535211
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {},
+  "framework": "langchain",
+  "slug": "Langflow还原"
+}
