@@ -1,0 +1,12 @@
+pyautogen>=0.2.35
+
+# 服务化依赖（server.py）
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.5
+pydantic-settings>=2.2
+httpx>=0.27
+langgraph-checkpoint-sqlite>=2.0
+
+# 测试依赖（生产镜像里可以删掉这一行）
+pytest>=8.0
