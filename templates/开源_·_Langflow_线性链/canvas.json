@@ -1,0 +1,196 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "输入",
+        "name": "input_1",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输入  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"输入 —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 380.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "system_prompt",
+        "label": "系统提示词",
+        "name": "system_prompt_2",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：系统提示词  (system_prompt_2)  类型：system_prompt\n# ═══════════════════════════════════════════════════════════════\n\ndef system_prompt_2(state: AgentState) -> dict:\n    \"\"\"系统提示词 —— 生成并放进 state，供下游复用。\"\"\"\n    base = \"你是一名严谨的分析师。\"\n    task = str(state.get(\"data\", \"\"))\n    prompt = llm.invoke([\n        {\"role\": \"system\", \"content\": \"擅长写提示词，输出一段可直接使用的 system prompt。\"},\n        {\"role\": \"user\", \"content\": f\"人设：{base}\\n本次任务：{task}\\n请据此写出 system prompt。\"},\n    ]).content.strip()\n    return {\"data\": task, \"system_prompt\": prompt}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"写入系统提示词，供下游 agent/llm 复用。\"\"\"\n    persona = ctx.params.get(\"persona\") or \"你是资深行业专家，先给结论再给依据。\"\n    ctx.state[\"system_prompt\"] = persona\n    return ctx.text\n",
+        "language": "python",
+        "params": {
+          "persona": "你是一名严谨的分析师。"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 760.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "llm",
+        "label": "LLM",
+        "name": "llm_3",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：LLM  (llm_3)  类型：llm\n# ═══════════════════════════════════════════════════════════════\n\nLLM_3_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"一次大模型调用，最基础的推理单元。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef llm_3(state: AgentState) -> dict:\n    \"\"\"LLM\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, LLM_3_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n3\", \"llm_3\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"单次大模型推理。\"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个严谨的助手，回答要准确、可执行。\"\n    return ctx.llm(ctx.text, system=system)\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 1140.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "formatter",
+        "label": "输出整理",
+        "name": "formatter_4",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出整理  (formatter_4)  类型：formatter\n# ═══════════════════════════════════════════════════════════════\n\nFORMATTER_4_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"你是格式化工具：把输入原样输出，最多调整 Markdown 结构；不得增删内容、不得添加解释或判断。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef formatter_4(state: AgentState) -> dict:\n    \"\"\"输出整理\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, FORMATTER_4_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n4\", \"formatter_4\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"格式化：把结果整理成指定格式（markdown / json / table）。\"\"\"\n    fmt = ctx.params.get(\"format\", \"markdown\")\n    return ctx.llm(\n        f\"把下面内容转成 {fmt} 格式，只输出结果本身：\\n{ctx.text}\",\n        system=\"你是格式化工具，不做内容增删。\",\n    )\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 1520.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "输出",
+        "name": "output_5",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出  (output_5)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_5(state: AgentState) -> dict:\n    \"\"\"输出 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0_1_0",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e1_2_1",
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e2_3_2",
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e3_4_3",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    }
+  ],
+  "viewport": {
+    "x": 0.0,
+    "y": 0.0,
+    "zoom": 0.62
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {}
+}
