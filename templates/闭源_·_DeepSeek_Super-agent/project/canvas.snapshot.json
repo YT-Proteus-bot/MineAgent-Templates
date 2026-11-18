@@ -1,0 +1,248 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "多渠道消息（IM / GitHub / 邮件）",
+        "name": "input_1",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：多渠道消息（IM / GitHub / 邮件）  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"多渠道消息（IM / GitHub / 邮件） —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 352.0,
+        "y": -272.0
+      },
+      "data": {
+        "kind": "supervisor",
+        "label": "Router（常驻协调）",
+        "name": "supervisor_2",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：Router（常驻协调）  (supervisor_2)  类型：supervisor\n# ═══════════════════════════════════════════════════════════════\n\ndef supervisor_2(state: AgentState) -> dict:\n    \"\"\"Router（常驻协调） —— 推理模式：react，最多 6 步。\"\"\"\n    task = state.get(\"data\", \"\")\n    origin = state.get(\"user_input\", \"\")\n    if origin and origin != task:\n        task = f\"{origin}\\n\\n## 上一轮观察 / 反馈\\n{task}\\n\\n请结合原始问题作答。\"\n    agent = _get_agent(\"n2\", lambda: create_agent(\n        model=llm,\n        tools=TOOLS_supervisor_2,\n        system_prompt=\"你是一个能调用工具的智能体。回答前先想清楚需要哪些信息，必要时调用工具，最后给出最终答案。\",\n    ))\n    try:\n        answer = _agent_stream(agent, task, \"n2\", \"supervisor_2\",\n                               14)\n    except Exception:  # noqa: BLE001\n        result = agent.invoke(\n            {\"messages\": [{\"role\": \"user\", \"content\": task}]},\n            config={\"recursion_limit\": 14},\n        )\n        messages = result.get(\"messages\") or []\n        answer = str(getattr(messages[-1], \"content\", \"\")) if messages else \"\"\n    return {\"data\": answer, \"answer\": answer}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"主管（Super-agent 的 Router 层）：把任务拆给多个下级并行执行，再汇总。\n\n    下级来自节点属性里的「下级 agent」；没配就回退到 params.workers。\n    多个 worker 是并行跑的，互不阻塞；某个失败不会拖垮整体，\n    失败项会写进最终提示里，方便主管决定重试还是降级。\n    \"\"\"\n    names = ctx.subordinates or ctx.params.get(\"workers\", [])\n    if not names:\n        return ctx.agent(task=ctx.text, tools=ctx.tools,\n                         mode=ctx.params.get(\"mode\", \"react\"),\n                         max_steps=ctx.params.get(\"max_steps\", 6))\n\n    tasks = [(name, ctx.text) for name in names]\n    ctx.log(f\"并行分派给 {len(tasks)} 个下级：{', '.join(names)}\")\n    results = ctx.delegate_many(\n        tasks,\n        max_workers=int(ctx.params.get(\"max_workers\", 4)),\n        timeout=float(ctx.params.get(\"timeout\", 180)),\n    )\n\n    done = [r for r in results if r.get(\"ok\")]\n    failed = [r for r in results if not r.get(\"ok\")]\n    summary = \"\\n\\n\".join(f\"### {r['worker']}\\n{r.get('output')}\" for r in done)\n    if failed:\n        summary += \"\\n\\n### 失败的子任务\\n\" + \"\\n\".join(\n            f\"- {r['worker']}：{r.get('error', '')}\" for r in failed\n        )\n    ctx.state[\"worker_results\"] = results\n\n    return ctx.llm(\n        f\"原始任务：{ctx.text}\\n\\n各下级的结果：\\n{summary}\\n\\n\"\n        f\"请汇总输出最终答案；有失败项时说明哪部分没完成。\",\n        system=\"你是主管，只输出整合后的结论。\",\n    )\n",
+        "language": "python",
+        "params": {
+          "max_workers": 4
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 760.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "worker",
+        "label": "Worker：问题复现",
+        "name": "worker_3",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：Worker：问题复现  (worker_3)  类型：worker\n# ═══════════════════════════════════════════════════════════════\n\ndef worker_3(state: AgentState) -> dict:\n    \"\"\"Worker：问题复现 —— 推理模式：react，最多 6 步。\"\"\"\n    task = state.get(\"data\", \"\")\n    origin = state.get(\"user_input\", \"\")\n    if origin and origin != task:\n        task = f\"{origin}\\n\\n## 上一轮观察 / 反馈\\n{task}\\n\\n请结合原始问题作答。\"\n    agent = _get_agent(\"n3\", lambda: create_agent(\n        model=llm,\n        tools=TOOLS_worker_3,\n        system_prompt=\"你是一个能调用工具的智能体。回答前先想清楚需要哪些信息，必要时调用工具，最后给出最终答案。\",\n    ))\n    try:\n        answer = _agent_stream(agent, task, \"n3\", \"worker_3\",\n                               14)\n    except Exception:  # noqa: BLE001\n        result = agent.invoke(\n            {\"messages\": [{\"role\": \"user\", \"content\": task}]},\n            config={\"recursion_limit\": 14},\n        )\n        messages = result.get(\"messages\") or []\n        answer = str(getattr(messages[-1], \"content\", \"\")) if messages else \"\"\n    return {\"data\": answer, \"answer\": answer}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"工作者：执行被分派的子任务。\"\"\"\n    role = ctx.params.get(\"role\", \"通用执行者\")\n    task = ctx.input.get(\"subtask\") if isinstance(ctx.input, dict) else ctx.text\n    system = f\"你的角色：{role}。只完成分配给你的子任务，结论要具体。\"\n    return ctx.agent(\n        task=task,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 4),\n    )\n",
+        "language": "python",
+        "params": {
+          "role": "复现与定位"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 784.0,
+        "y": -384.0
+      },
+      "data": {
+        "kind": "worker",
+        "label": "Worker：代码审查",
+        "name": "worker_4",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：Worker：代码审查  (worker_4)  类型：worker\n# ═══════════════════════════════════════════════════════════════\n\ndef worker_4(state: AgentState) -> dict:\n    \"\"\"Worker：代码审查 —— 推理模式：react，最多 6 步。\"\"\"\n    task = state.get(\"data\", \"\")\n    origin = state.get(\"user_input\", \"\")\n    if origin and origin != task:\n        task = f\"{origin}\\n\\n## 上一轮观察 / 反馈\\n{task}\\n\\n请结合原始问题作答。\"\n    agent = _get_agent(\"n4\", lambda: create_agent(\n        model=llm,\n        tools=TOOLS_worker_4,\n        system_prompt=\"你是一个能调用工具的智能体。回答前先想清楚需要哪些信息，必要时调用工具，最后给出最终答案。\",\n    ))\n    try:\n        answer = _agent_stream(agent, task, \"n4\", \"worker_4\",\n                               14)\n    except Exception:  # noqa: BLE001\n        result = agent.invoke(\n            {\"messages\": [{\"role\": \"user\", \"content\": task}]},\n            config={\"recursion_limit\": 14},\n        )\n        messages = result.get(\"messages\") or []\n        answer = str(getattr(messages[-1], \"content\", \"\")) if messages else \"\"\n    return {\"data\": answer, \"answer\": answer}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"工作者：执行被分派的子任务。\"\"\"\n    role = ctx.params.get(\"role\", \"通用执行者\")\n    task = ctx.input.get(\"subtask\") if isinstance(ctx.input, dict) else ctx.text\n    system = f\"你的角色：{role}。只完成分配给你的子任务，结论要具体。\"\n    return ctx.agent(\n        task=task,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 4),\n    )\n",
+        "language": "python",
+        "params": {
+          "role": "审查与修复"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 1504.0,
+        "y": -160.0
+      },
+      "data": {
+        "kind": "merger",
+        "label": "汇总与汇报",
+        "name": "merger_5",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：汇总与汇报  (merger_5)  类型：merger\n# ═══════════════════════════════════════════════════════════════\n\ndef merger_5(state: AgentState) -> dict:\n    \"\"\"汇总与汇报 —— 把多路结果合并成一份。\"\"\"\n    items = state.get(\"results\")\n    if not items:\n        items = [state.get(\"data\", \"\")]\n    if isinstance(items, str):\n        items = [items]\n    parts, seen = [], set()\n    for it in items:\n        s = it if isinstance(it, str) else json.dumps(it, ensure_ascii=False)\n        s = (s or \"\").strip()\n        if s and s not in seen:\n            seen.add(s)\n            parts.append(s)\n    merged = \"\\n\\n\".join(parts)\n    return {\"data\": merged, \"merged_count\": len(parts)}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"单次大模型推理。\"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个严谨的助手，回答要准确、可执行。\"\n    return ctx.llm(ctx.text, system=system)\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n6",
+      "type": "agent",
+      "position": {
+        "x": 1920.0,
+        "y": -128.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "输出",
+        "name": "output_6",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出  (output_6)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_6(state: AgentState) -> dict:\n    \"\"\"输出 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0_1_0",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e1_2_1",
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e1_3_2",
+      "source": "n2",
+      "target": "n4",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e2_4_3",
+      "source": "n3",
+      "target": "n5",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e3_4_4",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e4_5_5",
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    }
+  ],
+  "viewport": {
+    "x": 39.09029189950479,
+    "y": 341.1323563477016,
+    "zoom": 0.5623123491957968
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {}
+}
