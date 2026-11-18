@@ -1,0 +1,241 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 60.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "开始（输入变量）",
+        "name": "input_1",
+        "description": "每个智能体必须有的入口方块，接收用户输入。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：开始（输入变量）  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"开始（输入变量） —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 356.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "rag_retriever",
+        "label": "知识检索",
+        "name": "rag_retriever_2",
+        "description": "从 skills/ 与 docs/ 做混合召回。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：知识检索  (rag_retriever_2)  类型：rag_retriever\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef rag_retriever_2(query: str) -> str:\n    \"\"\"从 skills/ 与 docs/ 做混合召回。\"\"\"\n    return f\"[rag_retriever_2] 尚未实现：{query}\"",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"知识库检索：从 skills/ 或 docs/ 里做关键词+向量混合召回。\"\"\"\n    hits = ctx.retrieve(ctx.text, top_k=ctx.params.get(\"top_k\", 4))\n    ctx.emit(\"retrieval\", {\"count\": len(hits)})\n    return {\"query\": ctx.text, \"chunks\": hits}\n",
+        "language": "python",
+        "params": {
+          "top_k": 4
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 948.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "llm",
+        "label": "LLM 节点",
+        "name": "llm_3",
+        "description": "一次大模型调用，最基础的推理单元。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：LLM 节点  (llm_3)  类型：llm\n# ═══════════════════════════════════════════════════════════════\n\nLLM_3_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"一次大模型调用，最基础的推理单元。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef llm_3(state: AgentState) -> dict:\n    \"\"\"LLM 节点\"\"\"\n    model = _active_llm().bind(temperature=0.3)\n    text = _stream(model, LLM_3_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n3\", \"llm_3\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"单次大模型推理。\"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个严谨的助手，回答要准确、可执行。\"\n    return ctx.llm(ctx.text, system=system)\n",
+        "language": "python",
+        "params": {
+          "system": ""
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 652.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "condition",
+        "label": "条件分支",
+        "name": "condition_4",
+        "description": "用表达式判定 true/false 两条出边。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：条件分支  (condition_4)  类型：condition\n# ═══════════════════════════════════════════════════════════════\n\ndef condition_4(state: AgentState) -> dict:\n    \"\"\"条件分支 —— 按判别问题决定走 true 还是 false。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    question = \"len(state.get('context') or '') > 0\"\n    verdict = _active_llm().bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"你只输出 true 或 false，不要解释。\"},\n        {\"role\": \"user\", \"content\": f\"判别问题：{question}\\n\\n待判内容：\\n{text}\\n\\n只回答 true 或 false。\"},\n    ]).content.strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(state.get(\"loop_count\") or 0) + 1\n    max_loops = 4\n    if rounds > max_loops and branch != \"false\":\n        branch = \"false\"\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n4\", \"name\": \"condition_4\",\n               \"message\": f\"已到循环上限 {max_loops} 次，强制走出口\"})\n    _emit({\"event\": \"route\", \"node\": \"n4\", \"name\": \"condition_4\",\n           \"branch\": branch, \"reason\": _brief(verdict, 120)})\n    return {\"data\": text, \"route\": branch, \"loop_count\": rounds}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件判断：返回 \"true\" 或 \"false\"。\"\"\"\n    expr = ctx.params.get(\"expr\", \"len(ctx.text) > 0\")\n    try:\n        ok = bool(eval(expr, {\"__builtins__\": {}}, {\"ctx\": ctx, \"text\": ctx.text}))\n    except Exception as exc:  # noqa: BLE001\n        ctx.log(f\"条件求值失败，默认走 false：{exc}\")\n        ok = False\n    return \"true\" if ok else \"false\"\n",
+        "language": "python",
+        "params": {
+          "expr": "len(ctx.text) > 0",
+          "expression": "len(state.get('context') or '') > 0"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 948.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "formatter",
+        "label": "直接回答",
+        "name": "formatter_5",
+        "description": "整理成 markdown / json / 表格。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：直接回答  (formatter_5)  类型：formatter\n# ═══════════════════════════════════════════════════════════════\n\nFORMATTER_5_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"你是格式化工具：把输入原样输出，最多调整 Markdown 结构；不得增删内容、不得添加解释或判断。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef formatter_5(state: AgentState) -> dict:\n    \"\"\"直接回答\"\"\"\n    model = _active_llm().bind(temperature=0.3)\n    text = _stream(model, FORMATTER_5_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n5\", \"formatter_5\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"格式化：把结果整理成指定格式（markdown / json / table）。\"\"\"\n    fmt = ctx.params.get(\"format\", \"markdown\")\n    return ctx.llm(\n        f\"把下面内容转成 {fmt} 格式，只输出结果本身：\\n{ctx.text}\",\n        system=\"你是格式化工具，不做内容增删。\",\n    )\n",
+        "language": "python",
+        "params": {
+          "format": "markdown"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n6",
+      "type": "agent",
+      "position": {
+        "x": 1376.0,
+        "y": 48.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "结束",
+        "name": "output_6",
+        "description": "每个智能体必须有的出口方块，返回最终答案。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：结束  (output_6)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_6(state: AgentState) -> dict:\n    \"\"\"结束 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {
+          "source": "auto"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1__n1__n2",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e2__n2__n4",
+      "source": "n2",
+      "target": "n4",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e3__n4__n3__true",
+      "source": "n4",
+      "target": "n3",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true",
+      "data": {}
+    },
+    {
+      "id": "e4__n4__n5__false",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false",
+      "data": {}
+    },
+    {
+      "id": "e5__n3__n6",
+      "source": "n3",
+      "target": "n6",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e6__n5__n6",
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    }
+  ],
+  "viewport": {
+    "x": 290.7830609212482,
+    "y": 247.24393263992076,
+    "zoom": 0.6369489846458642
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {}
+}
