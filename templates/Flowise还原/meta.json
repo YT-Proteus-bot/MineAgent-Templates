@@ -1,0 +1,28 @@
+{
+  "slug": "Flowise还原",
+  "name": "Flowise还原",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "langchain",
+  "mode": "",
+  "node_count": 9,
+  "created_at": "2026-11-18T09:07:03+00:00",
+  "canvas_id": "1bc40ecff3e84e6c80475f5bec2d76ba",
+  "canvas_updated_at": "2026-11-18T09:06:08+00:00",
+  "graph_hash": "773821e367e3af4f",
+  "rev": 1,
+  "updated_at": "2026-11-18T09:07:04+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
