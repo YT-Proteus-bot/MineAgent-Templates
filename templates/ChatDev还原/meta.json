@@ -1,0 +1,28 @@
+{
+  "slug": "ChatDev还原",
+  "name": "ChatDev还原",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "crewai",
+  "mode": "",
+  "node_count": 8,
+  "created_at": "2026-11-18T09:07:16+00:00",
+  "canvas_id": "90793b254e5241949022adc6734c6237",
+  "canvas_updated_at": "2026-11-18T09:03:08+00:00",
+  "graph_hash": "487ab065747b70d1",
+  "rev": 1,
+  "updated_at": "2026-11-18T09:07:17+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
