@@ -1,0 +1,28 @@
+{
+  "slug": "开源_·_MetaGPT_软件公司",
+  "name": "开源 · MetaGPT 软件公司",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "metagpt",
+  "mode": "",
+  "node_count": 6,
+  "created_at": "2026-11-18T08:46:57+00:00",
+  "canvas_id": "e094db3983354d0b80d1be61a9a6e42d",
+  "canvas_updated_at": "2026-11-18T05:58:15+00:00",
+  "graph_hash": "8adac135596dc918",
+  "rev": 1,
+  "updated_at": "2026-11-18T08:46:58+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
