@@ -1,0 +1,340 @@
+{
+  "name": "工具搜索验证",
+  "slug": "工具搜索验证",
+  "framework": "langchain",
+  "framework_label": "LangChain / LangGraph",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "input",
+      "name": "input_1",
+      "label": "输入 Input",
+      "description": "每个智能体必须有的入口方块，接收用户输入。",
+      "file": "input_1.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输入 Input  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"输入 Input —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 60.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n2",
+      "kind": "planner",
+      "name": "planner_2",
+      "label": "任务规划",
+      "description": "把目标拆成有序执行计划。",
+      "file": "planner_2.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：任务规划  (planner_2)  类型：planner\n# ═══════════════════════════════════════════════════════════════\n\nPLANNER_2_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"你是一个任务规划专家。把目标拆成有序、可执行的步骤，每行一步；输入只是寒暄、闲聊或没有可拆解目标时，原样返回输入，不要追问。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef planner_2(state: AgentState) -> dict:\n    \"\"\"任务规划\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, PLANNER_2_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n2\", \"planner_2\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"任务规划：把目标拆成有序步骤。\"\"\"\n    return ctx.llm(\n        f\"目标：{ctx.text}\\n\\n请输出执行计划，每行一步，形如「1. ...」，只输出计划。\",\n        system=\"你是任务规划专家，计划必须可执行、有依赖顺序。\",\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 356.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n3",
+      "kind": "agent",
+      "name": "agent_3",
+      "label": "Agent（ReAct）",
+      "description": "自主 Agent，可选 ReAct / Plan / Goal 等推理模式；连到它的 tool 子图会自动注入工具。",
+      "file": "agent_3.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "max_steps": 6
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：Agent（ReAct）  (agent_3)  类型：agent\n# ═══════════════════════════════════════════════════════════════\n\ndef agent_3(state: AgentState) -> dict:\n    \"\"\"Agent（ReAct） —— 推理模式：react，最多 6 步。\"\"\"\n    task = state.get(\"data\", \"\")\n    origin = state.get(\"user_input\", \"\")\n    if origin and origin != task:\n        task = f\"{origin}\\n\\n## 上一轮观察 / 反馈\\n{task}\\n\\n请结合原始问题作答。\"\n    agent = _get_agent(\"n3\", lambda: create_agent(\n        model=llm,\n        tools=TOOLS_agent_3,\n        system_prompt=\"你是一个能调用工具的智能体。回答前先想清楚需要哪些信息，必要时调用工具，最后给出最终答案。\",\n    ))\n    try:\n        answer = _agent_stream(agent, task, \"n3\", \"agent_3\",\n                               14)\n    except Exception:  # noqa: BLE001\n        result = agent.invoke(\n            {\"messages\": [{\"role\": \"user\", \"content\": task}]},\n            config={\"recursion_limit\": 14},\n        )\n        messages = result.get(\"messages\") or []\n        answer = str(getattr(messages[-1], \"content\", \"\")) if messages else \"\"\n    return {\"data\": answer, \"answer\": answer}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"自主 Agent：按节点属性里选定的推理模式执行。\n\n    模式：react / plan_execute / goal / reflexion / tool_call / simple。\n    画布中「连到本节点输入」的 tool 子图会自动注入 ctx.tools。\n    如果这个 agent 配了下级，可以用 ctx.delegate(名字, 任务) 把活派出去。\n    \"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个能自主使用工具的智能体。\"\n    return ctx.agent(\n        task=ctx.text,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 6),\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 2132.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n4",
+      "kind": "tool",
+      "name": "search_tool",
+      "label": "工具：search",
+      "description": "工具节点：被 agent 节点调用时 kwargs 为模型给出的参数",
+      "file": "search_tool.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "name": "search",
+        "query": ""
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：工具：search  (search_tool)  类型：tool\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef search_tool(query: str) -> str:\n    \"\"\"工具节点：被 agent 节点调用时 kwargs 为模型给出的参数\"\"\"\n    return f\"[search_tool] 尚未实现：{query}\"",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext, **kwargs):\n    \"\"\"工具节点：被 agent 节点调用时 kwargs 为模型给出的参数。\n\n    直接连在流程中时也会作为普通节点执行一次。\n    \"\"\"\n    query = kwargs.get(\"query\") or ctx.params.get(\"query\") or ctx.text\n    ctx.log(f\"tool 执行：{query}\")\n    # TODO: 在这里写真正的工具逻辑\n    return {\"tool\": ctx.params.get(\"name\", \"tool\"), \"query\": query, \"result\": \"\"}\n",
+      "code_touched": false,
+      "position": {
+        "x": 948.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n5",
+      "kind": "observation",
+      "name": "observation_5",
+      "label": "观察 Observation",
+      "description": "记录本轮动作的真实结果，是 Agent 循环的反馈入口。",
+      "file": "observation_5.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：观察 Observation  (observation_5)  类型：observation\n# ═══════════════════════════════════════════════════════════════\n\nOBSERVATION_5_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"把工具返回的结果压缩成 3 条以内的关键观察；没有工具结果时保留原始回答的要点。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef observation_5(state: AgentState) -> dict:\n    \"\"\"观察 Observation\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, OBSERVATION_5_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n5\", \"observation_5\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"观察：记录本轮动作的真实结果（工具返回 / 环境反馈）。\"\"\"\n    obs = {\n        \"node\": ctx.node_name,\n        \"input\": ctx.input,\n        \"summary\": ctx.llm(\n            f\"把工具返回结果压缩成 3 条以内的观察要点：\\n{ctx.text}\",\n            system=\"只陈述事实，不推断。\",\n        ),\n        \"raw\": ctx.text,\n    }\n    ctx.state.setdefault(\"observations\", []).append(obs)\n    ctx.emit(\"observation\", {\"summary\": obs[\"summary\"]})\n    return obs\n",
+      "code_touched": false,
+      "position": {
+        "x": 1244.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n6",
+      "kind": "review_observation",
+      "name": "review_observation_6",
+      "label": "观察复核 Review",
+      "description": "判断观察是否充分可信，决定继续/重试/重规划。",
+      "file": "review_observation_6.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：观察复核 Review  (review_observation_6)  类型：review_observation\n# ═══════════════════════════════════════════════════════════════\n\nREVIEW_OBSERVATION_6_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"判断现有观察是否已经够用：够用就一句话确认；只有确实缺关键信息时才列出缺口，不要展开长分析。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef review_observation_6(state: AgentState) -> dict:\n    \"\"\"观察复核 Review\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, REVIEW_OBSERVATION_6_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n6\", \"review_observation_6\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"观察复核：判断观察是否充分、可信，是否需要再执行一次。\"\"\"\n    data = ctx.json_prompt(\n        \"复核下面的观察结果：是否足够支撑决策？是否与目标相关？是否可信？\",\n        schema={\"sufficient\": True, \"reliable\": True, \"missing\": [\"...\"],\n                \"next_action\": \"continue|retry|replan\", \"reason\": \"\"},\n        context=ctx.input,\n    )\n    ctx.state[\"review\"] = data\n    ctx.emit(\"review_observation\", data)\n    return data\n",
+      "code_touched": false,
+      "position": {
+        "x": 1540.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n7",
+      "kind": "router",
+      "name": "router_7",
+      "label": "够不够，决定收敛还是继续",
+      "description": "判断后走 true / false 两条出边，是分支与循环的枢纽。",
+      "file": "router_7.py",
+      "outputs": [
+        "true",
+        "false"
+      ],
+      "params": {
+        "question": "现有观察是否已经足够给出最终回答、不需要再执行一轮？如果只是寒暄、闲聊，或已有明确答案，就回答 true（收敛）。",
+        "max_loops": 0
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：够不够，决定收敛还是继续  (router_7)  类型：router\n# ═══════════════════════════════════════════════════════════════\n\ndef router_7(state: AgentState) -> dict:\n    \"\"\"够不够，决定收敛还是继续 —— 按判别问题决定走 true 还是 false。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    question = \"现有观察是否已经足够给出最终回答、不需要再执行一轮？如果只是寒暄、闲聊，或已有明确答案，就回答 true（收敛）。\"\n    verdict = llm.bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"你只输出 true 或 false，不要解释。\"},\n        {\"role\": \"user\", \"content\": f\"判别问题：{question}\\n\\n待判内容：\\n{text}\\n\\n只回答 true 或 false。\"},\n    ]).content.strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(state.get(\"loop_count\") or 0) + 1\n    max_loops = 0\n    if rounds > max_loops and branch != \"false\":\n        branch = \"false\"\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n7\", \"name\": \"router_7\",\n               \"message\": f\"已到循环上限 {max_loops} 次，强制走出口\"})\n    _emit({\"event\": \"route\", \"node\": \"n7\", \"name\": \"router_7\",\n           \"branch\": branch, \"reason\": _brief(verdict, 120)})\n    return {\"data\": text, \"route\": branch, \"loop_count\": rounds}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件路由：返回 \"true\" 或 \"false\" 决定走哪条出边。\"\"\"\n    question = ctx.params.get(\"question\") or \"该请求是否需要调用工具？\"\n    verdict = ctx.llm(\n        f\"判别问题：{question}\\n待判内容：{ctx.text}\\n只回答 true 或 false。\",\n        system=\"你只输出 true 或 false，不要解释。\",\n    ).strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(ctx.state.get(\"loop_count\") or 0) + 1\n    max_loops = int(ctx.params.get(\"max_loops\", 0) or 0)\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        ctx.log(f\"已到循环上限 {max_loops} 次，强制收敛\", \"warn\")\n    ctx.state[\"loop_count\"] = rounds\n    ctx.emit(\"route\", {\"branch\": branch})\n    return branch\n",
+      "code_touched": false,
+      "position": {
+        "x": 1836.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n8",
+      "kind": "format_observations",
+      "name": "format_observations_8",
+      "label": "观察格式化",
+      "description": "把多轮观察整理成结构化上下文。",
+      "file": "format_observations_8.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：观察格式化  (format_observations_8)  类型：format_observations\n# ═══════════════════════════════════════════════════════════════\n\nFORMAT_OBSERVATIONS_8_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"把多轮观察归并成结构化上下文：只做合并与去重，不新增事实、不编造标题。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef format_observations_8(state: AgentState) -> dict:\n    \"\"\"观察格式化\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, FORMAT_OBSERVATIONS_8_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n8\", \"format_observations_8\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"观察格式化：把多轮观察整理成结构化上下文。\"\"\"\n    obs = ctx.state.get(\"observations\", [])\n    if not obs and isinstance(ctx.input, list):\n        obs = ctx.input\n    lines = []\n    for i, item in enumerate(obs, 1):\n        summary = item.get(\"summary\") if isinstance(item, dict) else str(item)\n        lines.append(f\"{i}. {summary}\")\n    text = ctx.params.get(\"header\", \"## 已有观察\\n\") + \"\\n\".join(lines)\n    return {\"formatted\": text, \"count\": len(lines), \"raw\": obs}\n",
+      "code_touched": false,
+      "position": {
+        "x": 2132.0,
+        "y": 238.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n9",
+      "kind": "formatter",
+      "name": "formatter_9",
+      "label": "格式化输出",
+      "description": "整理成 markdown / json / 表格。",
+      "file": "formatter_9.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：格式化输出  (formatter_9)  类型：formatter\n# ═══════════════════════════════════════════════════════════════\n\nFORMATTER_9_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"你是格式化工具：把输入原样输出，最多调整 Markdown 结构；不得增删内容、不得添加解释或判断。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef formatter_9(state: AgentState) -> dict:\n    \"\"\"格式化输出\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, FORMATTER_9_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n9\", \"formatter_9\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"格式化：把结果整理成指定格式（markdown / json / table）。\"\"\"\n    fmt = ctx.params.get(\"format\", \"markdown\")\n    return ctx.llm(\n        f\"把下面内容转成 {fmt} 格式，只输出结果本身：\\n{ctx.text}\",\n        system=\"你是格式化工具，不做内容增删。\",\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 2428.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n10",
+      "kind": "output",
+      "name": "output_10",
+      "label": "输出 Output",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_10.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出 Output  (output_10)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_10(state: AgentState) -> dict:\n    \"\"\"输出 Output —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 2724.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": "调用工具"
+    },
+    {
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n6",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n7",
+      "target": "n8",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "已收敛"
+    },
+    {
+      "source": "n7",
+      "target": "n3",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "继续循环"
+    },
+    {
+      "source": "n8",
+      "target": "n9",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n9",
+      "target": "n10",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    }
+  ],
+  "max_visits": 8
+}

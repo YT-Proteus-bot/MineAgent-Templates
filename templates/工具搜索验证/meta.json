@@ -1,0 +1,28 @@
+{
+  "slug": "工具搜索验证",
+  "name": "工具搜索验证",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "langchain",
+  "mode": "",
+  "node_count": 10,
+  "created_at": "2026-11-18T08:14:39+00:00",
+  "canvas_id": "895788a4a69044c9aea8c27e4043aead",
+  "canvas_updated_at": "2026-11-18T08:02:26+00:00",
+  "graph_hash": "6d743ad6bac8ac49",
+  "rev": 1,
+  "updated_at": "2026-11-18T08:14:41+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
