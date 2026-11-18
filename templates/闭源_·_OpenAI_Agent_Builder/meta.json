@@ -1,0 +1,23 @@
+{
+  "slug": "闭源_·_OpenAI_Agent_Builder",
+  "name": "闭源 · OpenAI Agent Builder",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "openai_agents",
+  "mode": "",
+  "node_count": 6,
+  "created_at": "2026-11-18T02:58:54+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
