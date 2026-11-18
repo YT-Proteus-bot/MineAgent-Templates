@@ -1,0 +1,297 @@
+{
+  "name": "AutoGen还原",
+  "slug": "AutoGen还原",
+  "framework": "autogen",
+  "framework_label": "AutoGen",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "input",
+      "name": "input_1",
+      "label": "任务",
+      "description": "每个智能体必须有的入口方块，接收用户输入。",
+      "file": "input_1.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 1824.0,
+        "y": 432.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n2",
+      "kind": "supervisor",
+      "name": "supervisor_2",
+      "label": "群聊管理",
+      "description": "Router 角色：把任务并行派给多个下级 agent，收齐结果再汇总；单个下级失败不拖垮整体。",
+      "file": "supervisor_2.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "mode": "react",
+        "workers": [
+          "worker_a"
+        ],
+        "max_workers": 4,
+        "timeout": 180,
+        "max_rounds": 8
+      },
+      "code": "def run(ctx):\n    \"\"\"选下一个发言者：把当前对话和角色清单交给模型决定。\"\"\"\n    history = ctx.state.setdefault('chat_history', [])\n    history.append(str(ctx.text)[:2000])\n    pick = ctx.llm(\n        '可选发言者：planner（拆解需求）、coder（写并执行代码）。\\n'\n        '对话历史：\\n' + '\\n'.join(history[-6:]) +\n        '\\n只输出下一个发言者的名字，不要别的。')\n    speaker = 'coder' if 'coder' in str(pick).lower() else 'planner'\n    ctx.state['speaker'] = speaker\n    ctx.emit('speaker', {'next': speaker})\n    return {'data': '\\n'.join(history[-6:])}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"主管（Super-agent 的 Router 层）：把任务拆给多个下级并行执行，再汇总。\n\n    下级来自节点属性里的「下级 agent」；没配就回退到 params.workers。\n    多个 worker 是并行跑的，互不阻塞；某个失败不会拖垮整体，\n    失败项会写进最终提示里，方便主管决定重试还是降级。\n    \"\"\"\n    names = ctx.subordinates or ctx.params.get(\"workers\", [])\n    if not names:\n        return ctx.agent(task=ctx.text, tools=ctx.tools,\n                         mode=ctx.params.get(\"mode\", \"react\"),\n                         max_steps=ctx.params.get(\"max_steps\", 6))\n\n    tasks = [(name, ctx.text) for name in names]\n    ctx.log(f\"并行分派给 {len(tasks)} 个下级：{', '.join(names)}\")\n    results = ctx.delegate_many(\n        tasks,\n        max_workers=int(ctx.params.get(\"max_workers\", 4)),\n        timeout=float(ctx.params.get(\"timeout\", 180)),\n    )\n\n    done = [r for r in results if r.get(\"ok\")]\n    failed = [r for r in results if not r.get(\"ok\")]\n    summary = \"\\n\\n\".join(f\"### {r['worker']}\\n{r.get('output')}\" for r in done)\n    if failed:\n        summary += \"\\n\\n### 失败的子任务\\n\" + \"\\n\".join(\n            f\"- {r['worker']}：{r.get('error', '')}\" for r in failed\n        )\n    ctx.state[\"worker_results\"] = results\n\n    return ctx.llm(\n        f\"原始任务：{ctx.text}\\n\\n各下级的结果：\\n{summary}\\n\\n\"\n        f\"请汇总输出最终答案；有失败项时说明哪部分没完成。\",\n        system=\"你是主管，只输出整合后的结论。\",\n    )\n",
+      "code_touched": true,
+      "position": {
+        "x": 2512.0,
+        "y": 288.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n3",
+      "kind": "worker",
+      "name": "worker_3",
+      "label": "规划者",
+      "description": "执行被分派的子任务。",
+      "file": "worker_3.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "mode": "cot",
+        "role": "",
+        "max_steps": 2
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"工作者：执行被分派的子任务。\"\"\"\n    role = ctx.params.get(\"role\", \"通用执行者\")\n    task = ctx.input.get(\"subtask\") if isinstance(ctx.input, dict) else ctx.text\n    system = f\"你的角色：{role}。只完成分配给你的子任务，结论要具体。\"\n    return ctx.agent(\n        task=task,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 4),\n    )\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"工作者：执行被分派的子任务。\"\"\"\n    role = ctx.params.get(\"role\", \"通用执行者\")\n    task = ctx.input.get(\"subtask\") if isinstance(ctx.input, dict) else ctx.text\n    system = f\"你的角色：{role}。只完成分配给你的子任务，结论要具体。\"\n    return ctx.agent(\n        task=task,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 4),\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 652.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n4",
+      "kind": "worker",
+      "name": "worker_4",
+      "label": "执行者",
+      "description": "执行被分派的子任务。",
+      "file": "worker_4.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "mode": "react",
+        "role": "",
+        "max_steps": 6
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"工作者：执行被分派的子任务。\"\"\"\n    role = ctx.params.get(\"role\", \"通用执行者\")\n    task = ctx.input.get(\"subtask\") if isinstance(ctx.input, dict) else ctx.text\n    system = f\"你的角色：{role}。只完成分配给你的子任务，结论要具体。\"\n    return ctx.agent(\n        task=task,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 4),\n    )\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"工作者：执行被分派的子任务。\"\"\"\n    role = ctx.params.get(\"role\", \"通用执行者\")\n    task = ctx.input.get(\"subtask\") if isinstance(ctx.input, dict) else ctx.text\n    system = f\"你的角色：{role}。只完成分配给你的子任务，结论要具体。\"\n    return ctx.agent(\n        task=task,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 4),\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 948.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n5",
+      "kind": "guardrail",
+      "name": "guardrail_5",
+      "label": "沙箱",
+      "description": "拦截敏感内容与越权动作。",
+      "file": "guardrail_5.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "banned": [
+          "rm -rf",
+          "DROP TABLE"
+        ],
+        "rule": "代理产生的代码只在隔离环境执行，不影响宿主"
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"护栏：拦截敏感内容与越权动作。\"\"\"\n    text = ctx.text\n    banned = ctx.params.get(\"banned\", [\"rm -rf\", \"DROP TABLE\", \"sk-\"])\n    hit = [b for b in banned if b and b in text]\n    if hit:\n        ctx.emit(\"guardrail\", {\"blocked\": True, \"hit\": hit})\n        raise PermissionError(f\"护栏拦截：命中 {hit}\")\n    return text\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"护栏：拦截敏感内容与越权动作。\"\"\"\n    text = ctx.text\n    banned = ctx.params.get(\"banned\", [\"rm -rf\", \"DROP TABLE\", \"sk-\"])\n    hit = [b for b in banned if b and b in text]\n    if hit:\n        ctx.emit(\"guardrail\", {\"blocked\": True, \"hit\": hit})\n        raise PermissionError(f\"护栏拦截：命中 {hit}\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 1244.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n6",
+      "kind": "code_interpreter",
+      "name": "code_interpreter_6",
+      "label": "代码执行",
+      "description": "在受限沙箱里执行 Python。",
+      "file": "code_interpreter_6.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "code": ""
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"在受限沙箱里执行一段 Python 代码（由模型生成或 params.code 指定）。\"\"\"\n    code = ctx.params.get(\"code\") or ctx.text\n    out = ctx.exec_python(code)\n    return {\"code\": code, \"stdout\": out.get(\"stdout\", \"\"), \"stderr\": out.get(\"stderr\", \"\")}\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"在受限沙箱里执行一段 Python 代码（由模型生成或 params.code 指定）。\"\"\"\n    code = ctx.params.get(\"code\") or ctx.text\n    out = ctx.exec_python(code)\n    return {\"code\": code, \"stdout\": out.get(\"stdout\", \"\"), \"stderr\": out.get(\"stderr\", \"\")}\n",
+      "code_touched": false,
+      "position": {
+        "x": 1540.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n7",
+      "kind": "router",
+      "name": "router_7",
+      "label": "是否终止？",
+      "description": "判断后走 true / false 两条出边，是分支与循环的枢纽。",
+      "file": "router_7.py",
+      "outputs": [
+        "true",
+        "false"
+      ],
+      "params": {
+        "question": "对话中是否出现 TERMINATE，或任务已明确完成？是则 true。",
+        "max_loops": 8
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件路由：返回 \"true\" 或 \"false\" 决定走哪条出边。\"\"\"\n    question = ctx.params.get(\"question\") or \"该请求是否需要调用工具？\"\n    verdict = ctx.llm(\n        f\"判别问题：{question}\\n待判内容：{ctx.text}\\n只回答 true 或 false。\",\n        system=\"你只输出 true 或 false，不要解释。\",\n    ).strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(ctx.state.get(\"loop_count\") or 0) + 1\n    max_loops = int(ctx.params.get(\"max_loops\", 0) or 0)\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        ctx.log(f\"已到循环上限 {max_loops} 次，强制收敛\", \"warn\")\n    ctx.state[\"loop_count\"] = rounds\n    ctx.emit(\"route\", {\"branch\": branch})\n    return branch\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件路由：返回 \"true\" 或 \"false\" 决定走哪条出边。\"\"\"\n    question = ctx.params.get(\"question\") or \"该请求是否需要调用工具？\"\n    verdict = ctx.llm(\n        f\"判别问题：{question}\\n待判内容：{ctx.text}\\n只回答 true 或 false。\",\n        system=\"你只输出 true 或 false，不要解释。\",\n    ).strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(ctx.state.get(\"loop_count\") or 0) + 1\n    max_loops = int(ctx.params.get(\"max_loops\", 0) or 0)\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        ctx.log(f\"已到循环上限 {max_loops} 次，强制收敛\", \"warn\")\n    ctx.state[\"loop_count\"] = rounds\n    ctx.emit(\"route\", {\"branch\": branch})\n    return branch\n",
+      "code_touched": false,
+      "position": {
+        "x": 1836.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n8",
+      "kind": "output",
+      "name": "output_8",
+      "label": "最终结果",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_8.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "source": "auto"
+      },
+      "code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 2560.0,
+        "y": 96.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n6",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n7",
+      "target": "n8",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true"
+    },
+    {
+      "source": "n7",
+      "target": "n2",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false"
+    }
+  ],
+  "max_visits": 8
+}
