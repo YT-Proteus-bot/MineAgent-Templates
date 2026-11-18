@@ -1,0 +1,246 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "触发器（Webhook）",
+        "name": "input_1",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：触发器（Webhook）  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"触发器（Webhook） —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 380.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "http_request",
+        "label": "拉取业务数据",
+        "name": "http_request_2",
+        "description": "自定义工具：执行节点里的 Python 逻辑。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：拉取业务数据  (http_request_2)  类型：http_request\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef http_request_2(query: str) -> str:\n    \"\"\"自定义工具：执行节点里的 Python 逻辑。\"\"\"\n    import urllib.request\n    url = \"\" or query\n    req = urllib.request.Request(url, headers={\"User-Agent\": \"Mozilla/5.0\"})\n    with urllib.request.urlopen(req, timeout=20) as resp:\n        return resp.read().decode(\"utf-8\", \"replace\")[:4000]",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 760.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "llm",
+        "label": "AI 处理",
+        "name": "llm_3",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：AI 处理  (llm_3)  类型：llm\n# ═══════════════════════════════════════════════════════════════\n\nLLM_3_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"把原始数据整理成摘要。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef llm_3(state: AgentState) -> dict:\n    \"\"\"AI 处理\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, LLM_3_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n3\", \"llm_3\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"单次大模型推理。\"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个严谨的助手，回答要准确、可执行。\"\n    return ctx.llm(ctx.text, system=system)\n",
+        "language": "python",
+        "params": {
+          "system": "把原始数据整理成摘要。"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 1140.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "condition",
+        "label": "是否达到报警阈值",
+        "name": "condition_4",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：是否达到报警阈值  (condition_4)  类型：condition\n# ═══════════════════════════════════════════════════════════════\n\ndef condition_4(state: AgentState) -> dict:\n    \"\"\"是否达到报警阈值 —— 按判别问题决定走 true 还是 false。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    question = \"score > 0.8\"\n    verdict = llm.bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"你只输出 true 或 false，不要解释。\"},\n        {\"role\": \"user\", \"content\": f\"判别问题：{question}\\n\\n待判内容：\\n{text}\\n\\n只回答 true 或 false。\"},\n    ]).content.strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(state.get(\"loop_count\") or 0) + 1\n    max_loops = 4\n    if rounds > max_loops and branch != \"false\":\n        branch = \"false\"\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n4\", \"name\": \"condition_4\",\n               \"message\": f\"已到循环上限 {max_loops} 次，强制走出口\"})\n    _emit({\"event\": \"route\", \"node\": \"n4\", \"name\": \"condition_4\",\n           \"branch\": branch, \"reason\": _brief(verdict, 120)})\n    return {\"data\": text, \"route\": branch, \"loop_count\": rounds}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件判断：返回 \"true\" 或 \"false\"。\"\"\"\n    expr = ctx.params.get(\"expr\", \"len(ctx.text) > 0\")\n    try:\n        ok = bool(eval(expr, {\"__builtins__\": {}}, {\"ctx\": ctx, \"text\": ctx.text}))\n    except Exception as exc:  # noqa: BLE001\n        ctx.log(f\"条件求值失败，默认走 false：{exc}\")\n        ok = False\n    return \"true\" if ok else \"false\"\n",
+        "language": "python",
+        "params": {
+          "expression": "score > 0.8"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 1520.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "tool",
+        "label": "推送通知",
+        "name": "tool_5",
+        "description": "自定义工具：执行节点里的 Python 逻辑。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：推送通知  (tool_5)  类型：tool\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef tool_5(query: str) -> str:\n    \"\"\"自定义工具：执行节点里的 Python 逻辑。\"\"\"\n    return f\"[tool_5] 尚未实现：{query}\"",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext, **kwargs):\n    \"\"\"工具节点：被 agent 节点调用时 kwargs 为模型给出的参数。\n\n    直接连在流程中时也会作为普通节点执行一次。\n    \"\"\"\n    query = kwargs.get(\"query\") or ctx.params.get(\"query\") or ctx.text\n    ctx.log(f\"tool 执行：{query}\")\n    # TODO: 在这里写真正的工具逻辑\n    return {\"tool\": ctx.params.get(\"name\", \"tool\"), \"query\": query, \"result\": \"\"}\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n6",
+      "type": "agent",
+      "position": {
+        "x": 1900.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "记录结果",
+        "name": "output_6",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：记录结果  (output_6)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_6(state: AgentState) -> dict:\n    \"\"\"记录结果 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0_1_0",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e1_2_1",
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e2_3_2",
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e3_4_3",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true",
+      "data": {
+        "branch": "true"
+      }
+    },
+    {
+      "id": "e4_5_4",
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e3_5_5",
+      "source": "n4",
+      "target": "n6",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false",
+      "data": {
+        "branch": "false"
+      }
+    }
+  ],
+  "viewport": {
+    "x": 0.0,
+    "y": 0.0,
+    "zoom": 0.62
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {}
+}

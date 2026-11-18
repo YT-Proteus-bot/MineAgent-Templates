@@ -1,0 +1,8 @@
+# 无额外依赖（使用内置 runner）
+
+# 服务化依赖（server.py）
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.5
+httpx>=0.27
+pytest>=8.0
