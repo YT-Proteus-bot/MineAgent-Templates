@@ -1,0 +1,386 @@
+{
+  "name": "生产模板 · 带审批的 RAG 客服",
+  "slug": "生产模板_·_带审批的_RAG_客服",
+  "framework": "langchain",
+  "framework_label": "LangChain / LangGraph",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "input",
+      "name": "input_1",
+      "label": "用户问题",
+      "description": "每个智能体必须有的入口方块，接收用户输入。",
+      "file": "input_1.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "value": "帮我查一下订单 12345 的退款进度"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：用户问题  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"用户问题 —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 60.0,
+        "y": 185.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n2",
+      "kind": "intent_recognizer",
+      "name": "intent_2",
+      "label": "意图识别",
+      "description": "把用户输入归到预定义意图，输出置信度与理由。",
+      "file": "intent_2.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "categories": "售后, 咨询, 闲聊"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：意图识别  (intent_2)  类型：intent_recognizer\n# ═══════════════════════════════════════════════════════════════\n\ndef intent_2(state: AgentState) -> dict:\n    \"\"\"意图识别 —— 归到预定义意图之一。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    intents = [\"咨询\", \"任务执行\", \"闲聊\", \"投诉\", \"其他\"]\n    raw = _active_llm().bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"只输出 JSON，不要多余文字。\"},\n        {\"role\": \"user\", \"content\": f\"可选意图：{intents}\\n\\n用户输入：{text}\\n\\n\"\n                                       \"只输出 JSON：intent 填其中一个，confidence 填 0 到 1 的数\"},\n    ]).content\n    info = _parse_json(raw, {})\n    intent = str(info.get(\"intent\") or \"\").strip()\n    if intent not in intents:\n        intent = next((i for i in intents if i in text), intents[-1])\n    try:\n        conf = float(info.get(\"confidence\") or 0)\n    except (TypeError, ValueError):\n        conf = 0.0\n    return {\"data\": text, \"intent\": intent, \"confidence\": conf}",
+      "preview_code": "from runtime_sdk import JudgeUnavailable, NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"意图识别：优先用 Jev 做结构化判断，没配 Jev 时回退到普通模型。\n\n    Jev（TypeSafe System One）不生成文本，只回答选择题 / 判断题 / 打分题，\n    返回带概率和 confidence 的结构化答案，比让模型写 JSON 再解析更稳、更便宜。\n\n    要启用：设置环境变量 TYPESAFE_API_KEY；如果所在地区访问不了官方端点，\n    用 JEV_ENDPOINT 指向可用的兼容网关（例如国内中转服务）。\n    \"\"\"\n    intents = ctx.params.get(\"intents\") or [\"咨询\", \"任务执行\", \"闲聊\", \"投诉\", \"其他\"]\n    data = None\n\n    try:\n        resp = ctx.judge(\n            {\"message\": ctx.text},\n            {\n                \"intent\": {\n                    \"type\": \"choice\",\n                    \"instructions\": \"用户这句话属于哪个意图？\",\n                    \"criteria\": {i: None for i in intents},\n                },\n                \"needs_tool\": {\n                    \"type\": \"noul\",\n                    \"instructions\": \"完成这个请求是否需要调用外部工具或检索资料？\",\n                },\n                \"effort\": {\n                    \"type\": \"score\",\n                    \"instructions\": \"处理这个请求大约需要多少工作量？\",\n                    \"criteria\": [\"一句话就能答\", \"需要几步处理\", \"要检索或调工具\", \"要拆成多轮任务\"],\n                },\n            },\n        )\n        ans = resp.get(\"answers\") or {}\n        intent_ans = ans.get(\"intent\") or {}\n        data = {\n            \"intent\": intent_ans.get(\"choice\") or \"\",\n            \"confidence\": intent_ans.get(\"confidence\", 0.0),\n            \"probabilities\": intent_ans.get(\"probabilities\") or {},\n            \"needs_tool\": (ans.get(\"needs_tool\") or {}).get(\"noul\", 0.0),\n            \"effort\": (ans.get(\"effort\") or {}).get(\"score\", 0.0),\n            \"engine\": \"jev\",\n            \"model\": resp.get(\"model\", \"\"),\n        }\n    except JudgeUnavailable:\n        # 没配 Jev：用普通模型做同样的判断，保证节点照样能跑\n        fallback = ctx.json_prompt(\n            \"判断用户这句话属于哪个意图，并给出置信度。\",\n            schema={\"intent\": \"\", \"confidence\": 0.0, \"reason\": \"\"},\n            context=f\"可选意图：{intents}\\n用户输入：{ctx.text}\",\n        )\n        data = dict(fallback) if isinstance(fallback, dict) else {\"intent\": \"\", \"confidence\": 0.0}\n        data[\"engine\"] = \"llm\"\n\n    ctx.state[\"intent\"] = data.get(\"intent\") or \"\"\n    ctx.emit(\"intent\", data)\n    return data\n",
+      "code_touched": false,
+      "position": {
+        "x": 416.0,
+        "y": 185.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n3",
+      "kind": "query_rewrite",
+      "name": "rewrite_3",
+      "label": "查询改写",
+      "description": "把口语问题改写成适合检索的查询。",
+      "file": "rewrite_3.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：查询改写  (rewrite_3)  类型：query_rewrite\n# ═══════════════════════════════════════════════════════════════\n\ndef rewrite_3(state: AgentState) -> dict:\n    \"\"\"把口语问题改写成适合检索的查询。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = _active_llm().invoke(f\"把口语问题改写成适合检索的查询。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"查询改写：把口语化问题改写成适合检索的查询。\"\"\"\n    return ctx.llm(\n        f\"把下面这句话改写成 1 条用于检索的简洁查询，只输出查询本身：\\n{ctx.text}\",\n        system=\"你是检索查询改写器，只输出改写结果，不加解释。\",\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 772.0,
+        "y": 185.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n4",
+      "kind": "hybrid_retriever",
+      "name": "retriever_4",
+      "label": "混合检索",
+      "description": "向量召回 + 关键词召回各取一份。",
+      "file": "retriever_4.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "top_k": 6
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：混合检索  (retriever_4)  类型：hybrid_retriever\n# ═══════════════════════════════════════════════════════════════\n\ndef retriever_4(state: AgentState) -> dict:\n    \"\"\"混合检索 —— 向量库召回 + 文件关键词召回。\"\"\"\n    from runtime_sdk import project_retrieve, project_vector_search\n    query = str(state.get(\"data\", \"\"))\n    hits = project_vector_search(query, top_k=6, where=None)\n    keywords = project_retrieve(query, top_k=6, mode=\"keyword\")\n    _emit({\"event\": \"retrieval\", \"node\": \"n4\", \"name\": \"retriever_4\",\n           \"vector\": len(hits), \"keyword\": len(keywords)})\n    return {\"data\": hits or keywords, \"query\": query,\n             \"vector\": hits, \"keyword\": keywords}",
+      "preview_code": "from runtime_sdk import NodeContext\n\nimport json as _json\n\n\ndef run(ctx: NodeContext):\n    \"\"\"混合检索：向量库召回 + 文件关键词召回各取一份。\"\"\"\n    top_k = int(ctx.params.get(\"top_k\", 4))\n    query = ctx.state.get(\"query\") or ctx.text\n    where = ctx.params.get(\"where\") or \"\"\n    if isinstance(where, str) and where.strip():\n        try:\n            where = _json.loads(where)\n        except Exception:\n            where = None\n    vec = ctx.vector_search(query, top_k=top_k, where=where)\n    kw = ctx.retrieve(query, top_k=top_k, mode=\"keyword\")\n    ctx.emit(\"hybrid\", {\"vector\": len(vec), \"keyword\": len(kw)})\n    return {\"query\": query, \"vector\": vec, \"keyword\": kw}\n",
+      "code_touched": false,
+      "position": {
+        "x": 1128.0,
+        "y": 185.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n5",
+      "kind": "reranker",
+      "name": "rerank_5",
+      "label": "重排",
+      "description": "让模型给候选片段打相关性分，取前 K。",
+      "file": "rerank_5.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "top_k": 3
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：重排  (rerank_5)  类型：reranker\n# ═══════════════════════════════════════════════════════════════\n\ndef rerank_5(state: AgentState) -> dict:\n    \"\"\"让模型给候选片段打相关性分，取前 K。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = _active_llm().invoke(f\"让模型给候选片段打相关性分，取前 K。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"重排：让模型给候选片段逐个打相关性分，取前 K。\"\"\"\n    docs = ctx.input if isinstance(ctx.input, list) else [ctx.text]\n    query = ctx.state.get(\"query\") or ctx.text\n    return ctx.rerank(query, docs, top_k=int(ctx.params.get(\"top_k\", 3)))\n",
+      "code_touched": false,
+      "position": {
+        "x": 1484.0,
+        "y": 185.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n6",
+      "kind": "context_builder",
+      "name": "context_6",
+      "label": "上下文拼装",
+      "description": "把检索结果拼成带编号的参考上下文。",
+      "file": "context_6.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "max_chars": 3000
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：上下文拼装  (context_6)  类型：context_builder\n# ═══════════════════════════════════════════════════════════════\n\ndef context_6(state: AgentState) -> dict:\n    \"\"\"把检索结果拼成带编号的参考上下文。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = _active_llm().invoke(f\"把检索结果拼成带编号的参考上下文。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"上下文拼装：把检索结果压成带编号的参考上下文。\"\"\"\n    docs = ctx.input if isinstance(ctx.input, list) else [ctx.text]\n    context = ctx.build_context(docs, max_chars=int(ctx.params.get(\"max_chars\", 3000)))\n    ctx.state[\"context\"] = context\n    return context\n",
+      "code_touched": false,
+      "position": {
+        "x": 1840.0,
+        "y": 185.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n7",
+      "kind": "agent",
+      "name": "agent_7",
+      "label": "客服 Agent（ReAct）",
+      "description": "自主 Agent，可选 ReAct / Plan / Goal 等推理模式；连到它的 tool 子图会自动注入工具。",
+      "file": "agent_7.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "mode": "react",
+        "max_steps": 6,
+        "system_prompt": "你是售后客服。只依据检索到的资料回答；资料不足时明确说不知道，并建议转人工。涉及退款金额、补偿、对外承诺时不要自行决定。"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：客服 Agent（ReAct）  (agent_7)  类型：agent\n# ═══════════════════════════════════════════════════════════════\n\ndef agent_7(state: AgentState) -> dict:\n    \"\"\"客服 Agent（ReAct） —— 推理模式：react，最多 6 步。\"\"\"\n    task = state.get(\"data\", \"\")\n    origin = state.get(\"user_input\", \"\")\n    if origin and origin != task:\n        task = f\"{origin}\\n\\n## 上一轮观察 / 反馈\\n{task}\\n\\n请结合原始问题作答。\"\n    agent = _get_agent(_agent_key(\"n7\"), lambda: create_agent(\n        model=_active_llm(),\n        tools=TOOLS_agent_7,\n        system_prompt=\"你是售后客服。只依据检索到的资料回答；资料不足时明确说不知道，并建议转人工。涉及退款金额、补偿、对外承诺时不要自行决定。\",\n    ))\n    try:\n        answer = _agent_stream(agent, task, \"n7\", \"agent_7\",\n                               14)\n    except Exception:  # noqa: BLE001\n        result = agent.invoke(\n            {\"messages\": [{\"role\": \"user\", \"content\": task}]},\n            config={\"recursion_limit\": 14},\n        )\n        messages = result.get(\"messages\") or []\n        answer = str(getattr(messages[-1], \"content\", \"\")) if messages else \"\"\n    return {\"data\": answer, \"answer\": answer}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"自主 Agent：按节点属性里选定的推理模式执行。\n\n    模式：react / plan_execute / goal / reflexion / tool_call / simple。\n    画布中「连到本节点输入」的 tool 子图会自动注入 ctx.tools。\n    如果这个 agent 配了下级，可以用 ctx.delegate(名字, 任务) 把活派出去。\n    \"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个能自主使用工具的智能体。\"\n    return ctx.agent(\n        task=ctx.text,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 6),\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 2196.0,
+        "y": 175.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n8",
+      "kind": "guardrail",
+      "name": "guardrail_8",
+      "label": "输出护栏",
+      "description": "拦截敏感内容与越权动作。",
+      "file": "guardrail_8.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "policy": "block"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出护栏  (guardrail_8)  类型：guardrail\n# ═══════════════════════════════════════════════════════════════\n\ndef guardrail_8(state: AgentState) -> dict:\n    \"\"\"拦截敏感内容与越权动作。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = _active_llm().invoke(f\"拦截敏感内容与越权动作。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"护栏：拦截敏感内容与越权动作。\"\"\"\n    text = ctx.text\n    banned = ctx.params.get(\"banned\", [\"rm -rf\", \"DROP TABLE\", \"sk-\"])\n    hit = [b for b in banned if b and b in text]\n    if hit:\n        ctx.emit(\"guardrail\", {\"blocked\": True, \"hit\": hit})\n        raise PermissionError(f\"护栏拦截：命中 {hit}\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 2552.0,
+        "y": 185.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n9",
+      "kind": "human_approval",
+      "name": "approval_9",
+      "label": "人工审批（发送前）",
+      "description": "关键动作前挂起整个 run，等 /resume 放行；approve 走 true 分支、reject 走 false 分支。",
+      "file": "approval_9.py",
+      "outputs": [
+        "true",
+        "false"
+      ],
+      "params": {
+        "question": "是否批准把这条回复发送给客户？",
+        "outputs": [
+          "true",
+          "false"
+        ]
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：人工审批（发送前）  (approval_9)  类型：human_approval\n# ═══════════════════════════════════════════════════════════════\n\ndef approval_9(state: AgentState) -> dict:\n    \"\"\"人工审批 —— 挂起等 approve / reject，由 POST /resume 放行。\"\"\"\n    question = \"是否批准把这条回复发送给客户？\"\n    payload = {'node': \"n9\", 'name': \"approval_9\",\n               'question': question, 'input': _brief(state.get('data', ''), 800)}\n    _emit({'event': 'approval_required', **payload})\n    decision = interrupt(payload)  # ← 这里挂起；恢复时把 /resume 的值原样送回来\n    text = str(decision).strip().lower()\n    approved = text in ('approve', 'approved', 'yes', 'true', '1', '通过', '同意')\n    _emit({'event': 'approval_decided', 'node': \"n9\", 'approved': approved,\n           'decision': text[:120]})\n    return {'data': state.get('data', ''),\n             'route': 'true' if approved else 'false',\n             'approval': text[:200]}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"人工审批：无交互环境下按 params.default 自动放行或拒绝。\"\"\"\n    decision = ctx.ask_human(ctx.text, default=ctx.params.get(\"default\", \"approve\"))\n    ctx.emit(\"approval\", {\"decision\": decision})\n    return {\"text\": ctx.text, \"approved\": decision == \"approve\"}\n",
+      "code_touched": false,
+      "position": {
+        "x": 2908.0,
+        "y": 174.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n10",
+      "kind": "output",
+      "name": "output_10",
+      "label": "发送回复",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_10.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：发送回复  (output_10)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_10(state: AgentState) -> dict:\n    \"\"\"发送回复 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 3264.0,
+        "y": 32.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n11",
+      "kind": "output",
+      "name": "output_11",
+      "label": "转人工 / 拒绝",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_11.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：转人工 / 拒绝  (output_11)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_11(state: AgentState) -> dict:\n    \"\"\"转人工 / 拒绝 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 3264.0,
+        "y": 338.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n6",
+      "target": "n7",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n7",
+      "target": "n8",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n8",
+      "target": "n9",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n9",
+      "target": "n10",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n9",
+      "target": "n11",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n7",
+      "target": "n11",
+      "sourceHandle": "error",
+      "targetHandle": "in",
+      "label": "错误"
+    }
+  ],
+  "max_visits": 8
+}

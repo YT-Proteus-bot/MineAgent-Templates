@@ -1,0 +1,28 @@
+{
+  "slug": "生产模板_·_带审批的_RAG_客服",
+  "name": "生产模板 · 带审批的 RAG 客服",
+  "description": "",
+  "tags": [],
+  "author": "YT-Proteus-bot",
+  "framework": "langchain",
+  "mode": "",
+  "node_count": 11,
+  "created_at": "2026-11-18T08:14:13+00:00",
+  "canvas_id": "9a07b5615aee44678c891de348fe6daa",
+  "canvas_updated_at": "2026-11-18T07:56:40+00:00",
+  "graph_hash": "24893c70f7a75f0b",
+  "rev": 1,
+  "updated_at": "2026-11-18T08:14:15+00:00",
+  "project_files": [
+    ".env.example",
+    "README.md",
+    "agent.json",
+    "agent.py",
+    "canvas.snapshot.json",
+    "config.json",
+    "requirements.txt",
+    "run.ps1",
+    "run.sh",
+    "skills/.gitkeep"
+  ]
+}
