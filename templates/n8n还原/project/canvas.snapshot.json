@@ -1,0 +1,280 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 60.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "触发器",
+        "name": "input_1",
+        "description": "每个智能体必须有的入口方块，接收用户输入。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：触发器  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"触发器 —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 356.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "http_request",
+        "label": "调用接口",
+        "name": "http_request_2",
+        "description": "调用外部 REST 接口。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：调用接口  (http_request_2)  类型：http_request\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef http_request_2(query: str) -> str:\n    \"\"\"调用外部 REST 接口。\"\"\"\n    import urllib.request\n    url = \"https://httpbin.org/get\" or query\n    req = urllib.request.Request(url, headers={\"User-Agent\": \"Mozilla/5.0\"})\n    with urllib.request.urlopen(req, timeout=20) as resp:\n        return resp.read().decode(\"utf-8\", \"replace\")[:4000]",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+        "language": "python",
+        "params": {
+          "url": "https://httpbin.org/get",
+          "method": "GET"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 652.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "condition",
+        "label": "条件判断",
+        "name": "condition_3",
+        "description": "用表达式判定 true/false 两条出边。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：条件判断  (condition_3)  类型：condition\n# ═══════════════════════════════════════════════════════════════\n\ndef condition_3(state: AgentState) -> dict:\n    \"\"\"条件判断 —— 按判别问题决定走 true 还是 false。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    question = \"state.get('status') == 200\"\n    verdict = _active_llm().bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"你只输出 true 或 false，不要解释。\"},\n        {\"role\": \"user\", \"content\": f\"判别问题：{question}\\n\\n待判内容：\\n{text}\\n\\n只回答 true 或 false。\"},\n    ]).content.strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(state.get(\"loop_count\") or 0) + 1\n    max_loops = 4\n    if rounds > max_loops and branch != \"false\":\n        branch = \"false\"\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n3\", \"name\": \"condition_3\",\n               \"message\": f\"已到循环上限 {max_loops} 次，强制走出口\"})\n    _emit({\"event\": \"route\", \"node\": \"n3\", \"name\": \"condition_3\",\n           \"branch\": branch, \"reason\": _brief(verdict, 120)})\n    return {\"data\": text, \"route\": branch, \"loop_count\": rounds}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件判断：返回 \"true\" 或 \"false\"。\"\"\"\n    expr = ctx.params.get(\"expr\", \"len(ctx.text) > 0\")\n    try:\n        ok = bool(eval(expr, {\"__builtins__\": {}}, {\"ctx\": ctx, \"text\": ctx.text}))\n    except Exception as exc:  # noqa: BLE001\n        ctx.log(f\"条件求值失败，默认走 false：{exc}\")\n        ok = False\n    return \"true\" if ok else \"false\"\n",
+        "language": "python",
+        "params": {
+          "expr": "len(ctx.text) > 0",
+          "expression": "state.get('status') == 200"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 948.0,
+        "y": 60.0
+      },
+      "data": {
+        "kind": "formatter",
+        "label": "数据整形",
+        "name": "formatter_4",
+        "description": "整理成 markdown / json / 表格。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：数据整形  (formatter_4)  类型：formatter\n# ═══════════════════════════════════════════════════════════════\n\nFORMATTER_4_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"你是格式化工具：把输入原样输出，最多调整 Markdown 结构；不得增删内容、不得添加解释或判断。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef formatter_4(state: AgentState) -> dict:\n    \"\"\"数据整形\"\"\"\n    model = _active_llm().bind(temperature=0.3)\n    text = _stream(model, FORMATTER_4_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n4\", \"formatter_4\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"格式化：把结果整理成指定格式（markdown / json / table）。\"\"\"\n    fmt = ctx.params.get(\"format\", \"markdown\")\n    return ctx.llm(\n        f\"把下面内容转成 {fmt} 格式，只输出结果本身：\\n{ctx.text}\",\n        system=\"你是格式化工具，不做内容增删。\",\n    )\n",
+        "language": "python",
+        "params": {
+          "format": "markdown"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 1216.0,
+        "y": 48.0
+      },
+      "data": {
+        "kind": "http_request",
+        "label": "通知/写回",
+        "name": "http_request_5",
+        "description": "调用外部 REST 接口。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：通知/写回  (http_request_5)  类型：http_request\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef http_request_5(query: str) -> str:\n    \"\"\"调用外部 REST 接口。\"\"\"\n    import urllib.request\n    url = \"https://httpbin.org/get\" or query\n    req = urllib.request.Request(url, headers={\"User-Agent\": \"Mozilla/5.0\"})\n    with urllib.request.urlopen(req, timeout=20) as resp:\n        return resp.read().decode(\"utf-8\", \"replace\")[:4000]",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+        "language": "python",
+        "params": {
+          "url": "https://httpbin.org/get",
+          "method": "GET"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n6",
+      "type": "agent",
+      "position": {
+        "x": 948.0,
+        "y": 238.0
+      },
+      "data": {
+        "kind": "error_handler",
+        "label": "失败处理",
+        "name": "error_handler_6",
+        "description": "捕获上游异常并给出修复方案。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：失败处理  (error_handler_6)  类型：error_handler\n# ═══════════════════════════════════════════════════════════════\n\ndef error_handler_6(state: AgentState) -> dict:\n    \"\"\"捕获上游异常并给出修复方案。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = _active_llm().invoke(f\"捕获上游异常并给出修复方案。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"错误处理：捕获上游异常并给出兜底动作。\"\"\"\n    err = ctx.state.get(\"last_error\")\n    if not err:\n        return ctx.text\n    ctx.log(f\"捕获错误：{err}\")\n    return ctx.llm(\n        f\"执行出错：{err}\\n原始输入：{ctx.text}\\n请给出修复步骤或替代方案。\",\n        system=\"你是故障排查专家。\",\n    )\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n7",
+      "type": "agent",
+      "position": {
+        "x": 1616.0,
+        "y": 176.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "结束",
+        "name": "output_7",
+        "description": "每个智能体必须有的出口方块，返回最终答案。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：结束  (output_7)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_7(state: AgentState) -> dict:\n    \"\"\"结束 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {
+          "source": "auto"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1__n1__n2",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e2__n2__n3",
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e3__n3__n4__true",
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true",
+      "data": {}
+    },
+    {
+      "id": "e4__n3__n6__false",
+      "source": "n3",
+      "target": "n6",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false",
+      "data": {}
+    },
+    {
+      "id": "e5__n4__n5",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e6__n5__n7",
+      "source": "n5",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    },
+    {
+      "id": "e7__n6__n7",
+      "source": "n6",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null,
+      "data": {}
+    }
+  ],
+  "viewport": {
+    "x": 0.0,
+    "y": 0.0,
+    "zoom": 0.85
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {},
+  "framework": "langchain",
+  "slug": "n8n还原"
+}
