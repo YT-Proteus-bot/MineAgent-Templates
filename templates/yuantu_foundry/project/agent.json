@@ -1,0 +1,441 @@
+{
+  "name": "yuantu_foundry",
+  "slug": "yuantu_foundry",
+  "framework": "langchain",
+  "framework_label": "LangChain / LangGraph",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "input",
+      "name": "input_1",
+      "label": "输入 Input",
+      "description": "每个智能体必须有的入口方块，接收用户输入。",
+      "file": "input_1.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输入 Input  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"输入 Input —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+      "code_touched": false,
+      "position": {
+        "x": 60.0,
+        "y": 561.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n2",
+      "kind": "planner",
+      "name": "planner_2",
+      "label": "任务分发·调度 (dispatch/scheduler)",
+      "description": "把目标拆成有序执行计划。",
+      "file": "planner_2.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：任务分发·调度 (dispatch/scheduler)  (planner_2)  类型：planner\n# ═══════════════════════════════════════════════════════════════\n\nPLANNER_2_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"你是一个任务规划专家。把目标拆成有序、可执行的步骤，每行一步；输入只是寒暄、闲聊或没有可拆解目标时，原样返回输入，不要追问。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef planner_2(state: AgentState) -> dict:\n    \"\"\"任务分发·调度 (dispatch/scheduler)\"\"\"\n    model = _active_llm().bind(temperature=0.3)\n    text = _stream(model, PLANNER_2_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n2\", \"planner_2\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"任务规划：把目标拆成有序步骤。\"\"\"\n    return ctx.llm(\n        f\"目标：{ctx.text}\\n\\n请输出执行计划，每行一步，形如「1. ...」，只输出计划。\",\n        system=\"你是任务规划专家，计划必须可执行、有依赖顺序。\",\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 636.0,
+        "y": 561.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n3",
+      "kind": "agent",
+      "name": "agent_3",
+      "label": "Agent（ReAct）执行核心",
+      "description": "自主 Agent，可选 ReAct / Plan / Goal 等推理模式；连到它的 tool 子图会自动注入工具。",
+      "file": "agent_3.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "mode": "react",
+        "system": "",
+        "max_steps": 10
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：Agent（ReAct）执行核心  (agent_3)  类型：agent\n# ═══════════════════════════════════════════════════════════════\n\ndef agent_3(state: AgentState) -> dict:\n    \"\"\"Agent（ReAct）执行核心 —— 推理模式：react，最多 10 步。\"\"\"\n    task = state.get(\"data\", \"\")\n    origin = state.get(\"user_input\", \"\")\n    if origin and origin != task:\n        task = f\"{origin}\\n\\n## 上一轮观察 / 反馈\\n{task}\\n\\n请结合原始问题作答。\"\n    agent = _get_agent(_agent_key(\"n3\"), lambda: create_agent(\n        model=_active_llm(),\n        tools=TOOLS_agent_3,\n        system_prompt=\"你是一个能调用工具的智能体。回答前先想清楚需要哪些信息，必要时调用工具，最后给出最终答案。\",\n    ))\n    try:\n        answer = _agent_stream(agent, task, \"n3\", \"agent_3\",\n                               22)\n    except Exception:  # noqa: BLE001\n        result = agent.invoke(\n            {\"messages\": [{\"role\": \"user\", \"content\": task}]},\n            config={\"recursion_limit\": 22},\n        )\n        messages = result.get(\"messages\") or []\n        answer = str(getattr(messages[-1], \"content\", \"\")) if messages else \"\"\n    return {\"data\": answer, \"answer\": answer}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"自主 Agent：按节点属性里选定的推理模式执行。\n\n    模式：react / plan_execute / goal / reflexion / tool_call / simple。\n    画布中「连到本节点输入」的 tool 子图会自动注入 ctx.tools。\n    如果这个 agent 配了下级，可以用 ctx.delegate(名字, 任务) 把活派出去。\n    \"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个能自主使用工具的智能体。\"\n    return ctx.agent(\n        task=ctx.text,\n        tools=ctx.tools,\n        system=system,\n        mode=ctx.params.get(\"mode\", \"react\"),\n        max_steps=ctx.params.get(\"max_steps\", 6),\n    )\n",
+      "code_touched": false,
+      "position": {
+        "x": 1212.0,
+        "y": 551.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n4",
+      "kind": "mcp_tool",
+      "name": "mcp_tool_4",
+      "label": "MCP 工具",
+      "description": "调用 MCP 服务器暴露的工具。",
+      "file": "mcp_tool_4.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "server": "",
+        "tool": ""
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：MCP 工具  (mcp_tool_4)  类型：mcp_tool\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef mcp_tool_4(query: str) -> str:\n    \"\"\"调用 MCP 服务器暴露的工具。\"\"\"\n    return f\"[mcp_tool_4] 尚未实现：{query}\"",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext, **kwargs):\n    \"\"\"调用一个 MCP 服务器暴露的工具。\"\"\"\n    server = ctx.params.get(\"server\", \"http://127.0.0.1:3000\")\n    tool = ctx.params.get(\"tool\", \"search\")\n    args = kwargs or ctx.params.get(\"args\", {\"query\": ctx.text})\n    return ctx.mcp_call(server, tool, args)\n",
+      "code_touched": false,
+      "position": {
+        "x": 1788.0,
+        "y": 60.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n5",
+      "kind": "browser",
+      "name": "browser_5",
+      "label": "浏览器 (Playwright)",
+      "description": "抓取网页正文并提炼要点。",
+      "file": "browser_5.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "url": ""
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：浏览器 (Playwright)  (browser_5)  类型：browser\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef browser_5(query: str) -> str:\n    \"\"\"抓取网页正文并提炼要点。\"\"\"\n    return f\"[browser_5] 尚未实现：{query}\"",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"抓取网页正文（无需浏览器内核，基于 HTTP + 正文抽取）。\"\"\"\n    url = ctx.params.get(\"url\") or ctx.text.strip()\n    page = ctx.fetch_text(url)\n    return ctx.llm(f\"网页内容：\\n{page}\\n\\n请提炼要点。\", system=\"只依据网页内容。\")\n",
+      "code_touched": false,
+      "position": {
+        "x": 1788.0,
+        "y": 394.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n6",
+      "kind": "http_request",
+      "name": "http_request_6",
+      "label": "HTTP 请求",
+      "description": "调用外部 REST 接口。",
+      "file": "http_request_6.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "url": "https://httpbin.org/get",
+        "method": "GET"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：HTTP 请求  (http_request_6)  类型：http_request\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef http_request_6(query: str) -> str:\n    \"\"\"调用外部 REST 接口。\"\"\"\n    import urllib.request\n    url = \"https://httpbin.org/get\" or query\n    req = urllib.request.Request(url, headers={\"User-Agent\": \"Mozilla/5.0\"})\n    with urllib.request.urlopen(req, timeout=20) as resp:\n        return resp.read().decode(\"utf-8\", \"replace\")[:4000]",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"发起 HTTP 请求，返回 JSON。\"\"\"\n    url = ctx.params.get(\"url\") or \"https://httpbin.org/get\"\n    method = (ctx.params.get(\"method\") or \"GET\").upper()\n    resp = ctx.http(method, url, params={\"q\": ctx.text} if method == \"GET\" else None,\n                    json={\"q\": ctx.text} if method != \"GET\" else None)\n    return resp\n",
+      "code_touched": false,
+      "position": {
+        "x": 1788.0,
+        "y": 728.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n7",
+      "kind": "doc_loader",
+      "name": "doc_loader_7",
+      "label": "文档解析 (PDF/DOCX/XLSX)",
+      "description": "把 pdf / docx / md / csv 抽成纯文本。",
+      "file": "doc_loader_7.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "path": "docs/sample.pdf"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：文档解析 (PDF/DOCX/XLSX)  (doc_loader_7)  类型：doc_loader\n# ═══════════════════════════════════════════════════════════════\n\ndef doc_loader_7(state: AgentState) -> dict:\n    \"\"\"文档解析 (PDF/DOCX/XLSX) —— 把文本类文档读成纯文本。\"\"\"\n    from pathlib import Path as _Path\n    raw_path = \"docs/sample.pdf\" or str(state.get(\"data\", \"\")).strip()\n    if not raw_path:\n        raise ValueError(\"doc_loader 需要文件路径（参数 path 或输入内容）\")\n    path = _Path(raw_path)\n    if not path.is_absolute():\n        path = _Path(__file__).resolve().parent / path\n    # 输入不是可读文件时，把它当成已经加载好的正文，链路照样能往下走\n    if not path.exists():\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n7\",\n               \"name\": \"doc_loader_7\", \"message\": \"输入不是文件，按正文处理\"})\n        return {\"data\": raw_path, \"source\": \"inline\"}\n    suffix = path.suffix.lower()\n    if suffix == \".pdf\":\n        try:\n            from pypdf import PdfReader\n        except ImportError as exc:\n            raise RuntimeError(\"读 PDF 需要 pypdf：pip install pypdf\") from exc\n        text = \"\\n\".join((pg.extract_text() or \"\") for pg in PdfReader(str(path)).pages)\n    elif suffix == \".docx\":\n        try:\n            import docx\n        except ImportError as exc:\n            raise RuntimeError(\"读 docx 需要 python-docx：pip install python-docx\") from exc\n        text = \"\\n\".join(p_.text for p_ in docx.Document(str(path)).paragraphs)\n    else:\n        text = path.read_text(encoding=\"utf-8\", errors=\"replace\")\n    _emit({\"event\": \"log\", \"node\": \"n7\", \"name\": \"doc_loader_7\",\n           \"message\": f\"已读取 {path.name}，{len(text)} 字符\"})\n    return {\"data\": text, \"source\": str(path.name)}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"文档加载：把 pdf / docx / md / txt / csv 抽成纯文本。\"\"\"\n    path = ctx.params.get(\"path\") or ctx.text.strip()\n    if not path:\n        raise ValueError(\"doc_loader 需要指定文件路径（可写在参数 path 里）\")\n    return ctx.load_document(path)\n",
+      "code_touched": false,
+      "position": {
+        "x": 1788.0,
+        "y": 1062.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n8",
+      "kind": "observation",
+      "name": "observation_8",
+      "label": "观察：汇总工具结果",
+      "description": "记录本轮动作的真实结果，是 Agent 循环的反馈入口。",
+      "file": "observation_8.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {},
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：观察：汇总工具结果  (observation_8)  类型：observation\n# ═══════════════════════════════════════════════════════════════\n\nOBSERVATION_8_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"把工具返回的结果压缩成 3 条以内的关键观察；没有工具结果时保留原始回答的要点。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef observation_8(state: AgentState) -> dict:\n    \"\"\"观察：汇总工具结果\"\"\"\n    model = _active_llm().bind(temperature=0.3)\n    text = _stream(model, OBSERVATION_8_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n8\", \"observation_8\")\n    return {\"data\": text}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"观察：记录本轮动作的真实结果（工具返回 / 环境反馈）。\"\"\"\n    obs = {\n        \"node\": ctx.node_name,\n        \"input\": ctx.input,\n        \"summary\": ctx.llm(\n            f\"把工具返回结果压缩成 3 条以内的观察要点：\\n{ctx.text}\",\n            system=\"只陈述事实，不推断。\",\n        ),\n        \"raw\": ctx.text,\n    }\n    ctx.state.setdefault(\"observations\", []).append(obs)\n    ctx.emit(\"observation\", {\"summary\": obs[\"summary\"]})\n    return obs\n",
+      "code_touched": false,
+      "position": {
+        "x": 2364.0,
+        "y": 561.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n9",
+      "kind": "human_approval",
+      "name": "human_approval_9",
+      "label": "人工审批 (approvals)",
+      "description": "关键动作前挂起整个 run，等 /resume 放行；approve 走 true 分支、reject 走 false 分支。",
+      "file": "human_approval_9.py",
+      "outputs": [
+        "true",
+        "false"
+      ],
+      "params": {
+        "default": "approve"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：人工审批 (approvals)  (human_approval_9)  类型：human_approval\n# ═══════════════════════════════════════════════════════════════\n\ndef human_approval_9(state: AgentState) -> dict:\n    \"\"\"人工审批 —— 挂起等 approve / reject，由 POST /resume 放行。\"\"\"\n    question = \"是否批准继续执行「人工审批 (approvals)」？\"\n    payload = {'node': \"n9\", 'name': \"human_approval_9\",\n               'question': question, 'input': _brief(state.get('data', ''), 800)}\n    _emit({'event': 'approval_required', **payload})\n    decision = interrupt(payload)  # ← 这里挂起；恢复时把 /resume 的值原样送回来\n    text = str(decision).strip().lower()\n    approved = text in ('approve', 'approved', 'yes', 'true', '1', '通过', '同意')\n    _emit({'event': 'approval_decided', 'node': \"n9\", 'approved': approved,\n           'decision': text[:120]})\n    return {'data': state.get('data', ''),\n             'route': 'true' if approved else 'false',\n             'approval': text[:200]}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"人工审批：无交互环境下按 params.default 自动放行或拒绝。\"\"\"\n    decision = ctx.ask_human(ctx.text, default=ctx.params.get(\"default\", \"approve\"))\n    ctx.emit(\"approval\", {\"decision\": decision})\n    return {\"text\": ctx.text, \"approved\": decision == \"approve\"}\n",
+      "code_touched": false,
+      "position": {
+        "x": 2940.0,
+        "y": 550.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n10",
+      "kind": "router",
+      "name": "router_10",
+      "label": "收敛判断",
+      "description": "判断后走 true / false 两条出边，是分支与循环的枢纽。",
+      "file": "router_10.py",
+      "outputs": [
+        "true",
+        "false"
+      ],
+      "params": {
+        "question": "该请求是否需要调用工具？",
+        "max_loops": 0
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：收敛判断  (router_10)  类型：router\n# ═══════════════════════════════════════════════════════════════\n\ndef router_10(state: AgentState) -> dict:\n    \"\"\"收敛判断 —— 按判别问题决定走 true 还是 false。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    question = \"该请求是否需要调用工具？\"\n    verdict = _active_llm().bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"你只输出 true 或 false，不要解释。\"},\n        {\"role\": \"user\", \"content\": f\"判别问题：{question}\\n\\n待判内容：\\n{text}\\n\\n只回答 true 或 false。\"},\n    ]).content.strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(state.get(\"loop_count\") or 0) + 1\n    max_loops = 0\n    if rounds > max_loops and branch != \"false\":\n        branch = \"false\"\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n10\", \"name\": \"router_10\",\n               \"message\": f\"已到循环上限 {max_loops} 次，强制走出口\"})\n    _emit({\"event\": \"route\", \"node\": \"n10\", \"name\": \"router_10\",\n           \"branch\": branch, \"reason\": _brief(verdict, 120)})\n    return {\"data\": text, \"route\": branch, \"loop_count\": rounds}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件路由：返回 \"true\" 或 \"false\" 决定走哪条出边。\"\"\"\n    question = ctx.params.get(\"question\") or \"该请求是否需要调用工具？\"\n    verdict = ctx.llm(\n        f\"判别问题：{question}\\n待判内容：{ctx.text}\\n只回答 true 或 false。\",\n        system=\"你只输出 true 或 false，不要解释。\",\n    ).strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(ctx.state.get(\"loop_count\") or 0) + 1\n    max_loops = int(ctx.params.get(\"max_loops\", 0) or 0)\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        ctx.log(f\"已到循环上限 {max_loops} 次，强制收敛\", \"warn\")\n    ctx.state[\"loop_count\"] = rounds\n    ctx.emit(\"route\", {\"branch\": branch})\n    return branch\n",
+      "code_touched": false,
+      "position": {
+        "x": 3516.0,
+        "y": 550.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n11",
+      "kind": "summarizer",
+      "name": "summarizer_11",
+      "label": "上下文压缩 (compaction)",
+      "description": "按长度要求压缩内容。",
+      "file": "summarizer_11.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "max_chars": 300
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：上下文压缩 (compaction)  (summarizer_11)  类型：summarizer\n# ═══════════════════════════════════════════════════════════════\n\ndef summarizer_11(state: AgentState) -> dict:\n    \"\"\"按长度要求压缩内容。\"\"\"\n    # 这个节点类型还没有专门的原生写法，先用一次模型调用占位\n    msg = _active_llm().invoke(f\"按长度要求压缩内容。\\n\\n输入：{state.get('data', '')}\")\n    return {\"data\": msg.content}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"摘要：按目标长度压缩内容。\"\"\"\n    limit = ctx.params.get(\"max_chars\", 300)\n    return ctx.llm(f\"用不超过 {limit} 字概括要点：\\n{ctx.text}\", system=\"只输出摘要正文。\")\n",
+      "code_touched": false,
+      "position": {
+        "x": 4092.0,
+        "y": 561.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    },
+    {
+      "id": "n12",
+      "kind": "output",
+      "name": "output_12",
+      "label": "输出 Output",
+      "description": "每个智能体必须有的出口方块，返回最终答案。",
+      "file": "output_12.py",
+      "outputs": [
+        "out"
+      ],
+      "params": {
+        "source": "auto"
+      },
+      "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出 Output  (output_12)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_12(state: AgentState) -> dict:\n    \"\"\"输出 Output —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+      "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+      "code_touched": false,
+      "position": {
+        "x": 3904.0,
+        "y": 288.0
+      },
+      "org": {
+        "superior": "",
+        "subordinates": [],
+        "peers": []
+      },
+      "model": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n5",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n6",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n3",
+      "target": "n7",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n4",
+      "target": "n8",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n5",
+      "target": "n8",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n6",
+      "target": "n8",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n7",
+      "target": "n8",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n8",
+      "target": "n9",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n9",
+      "target": "n10",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    },
+    {
+      "source": "n10",
+      "target": "n12",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true"
+    },
+    {
+      "source": "n10",
+      "target": "n11",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false"
+    },
+    {
+      "source": "n11",
+      "target": "n3",
+      "sourceHandle": null,
+      "targetHandle": "in",
+      "label": null
+    }
+  ],
+  "max_visits": 8
+}
