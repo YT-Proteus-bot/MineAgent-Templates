@@ -1,0 +1,250 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "agent",
+      "position": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "input",
+        "label": "用户消息",
+        "name": "input_1",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：用户消息  (input_1)  类型：input\n# ═══════════════════════════════════════════════════════════════\n\ndef input_1(state: AgentState) -> dict:\n    \"\"\"用户消息 —— 智能体的入口，接收用户输入。\"\"\"\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"入口：把用户输入交给下游。\"\"\"\n    text = ctx.text.strip()\n    if not text:\n        raise ValueError(\"输入为空，请先在运行面板填写输入\")\n    ctx.log(f\"收到输入：{len(text)} 字\")\n    return text\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n2",
+      "type": "agent",
+      "position": {
+        "x": 380.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "intent_recognizer",
+        "label": "意图分流",
+        "name": "intent_recognizer_2",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：意图分流  (intent_recognizer_2)  类型：intent_recognizer\n# ═══════════════════════════════════════════════════════════════\n\ndef intent_recognizer_2(state: AgentState) -> dict:\n    \"\"\"意图分流 —— 归到预定义意图之一。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    intents = [\"闲聊「, 」查资料「, 」执行操作\"]\n    raw = llm.bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"只输出 JSON，不要多余文字。\"},\n        {\"role\": \"user\", \"content\": f\"可选意图：{intents}\\n\\n用户输入：{text}\\n\\n\"\n                                       \"只输出 JSON：intent 填其中一个，confidence 填 0 到 1 的数\"},\n    ]).content\n    info = _parse_json(raw, {})\n    intent = str(info.get(\"intent\") or \"\").strip()\n    if intent not in intents:\n        intent = next((i for i in intents if i in text), intents[-1])\n    try:\n        conf = float(info.get(\"confidence\") or 0)\n    except (TypeError, ValueError):\n        conf = 0.0\n    return {\"data\": text, \"intent\": intent, \"confidence\": conf}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import JudgeUnavailable, NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"意图识别：优先用 Jev 做结构化判断，没配 Jev 时回退到普通模型。\n\n    Jev（TypeSafe System One）不生成文本，只回答选择题 / 判断题 / 打分题，\n    返回带概率和 confidence 的结构化答案，比让模型写 JSON 再解析更稳、更便宜。\n\n    要启用：设置环境变量 TYPESAFE_API_KEY；如果所在地区访问不了官方端点，\n    用 JEV_ENDPOINT 指向可用的兼容网关（例如国内中转服务）。\n    \"\"\"\n    intents = ctx.params.get(\"intents\") or [\"咨询\", \"任务执行\", \"闲聊\", \"投诉\", \"其他\"]\n    data = None\n\n    try:\n        resp = ctx.judge(\n            {\"message\": ctx.text},\n            {\n                \"intent\": {\n                    \"type\": \"choice\",\n                    \"instructions\": \"用户这句话属于哪个意图？\",\n                    \"criteria\": {i: None for i in intents},\n                },\n                \"needs_tool\": {\n                    \"type\": \"noul\",\n                    \"instructions\": \"完成这个请求是否需要调用外部工具或检索资料？\",\n                },\n                \"effort\": {\n                    \"type\": \"score\",\n                    \"instructions\": \"处理这个请求大约需要多少工作量？\",\n                    \"criteria\": [\"一句话就能答\", \"需要几步处理\", \"要检索或调工具\", \"要拆成多轮任务\"],\n                },\n            },\n        )\n        ans = resp.get(\"answers\") or {}\n        intent_ans = ans.get(\"intent\") or {}\n        data = {\n            \"intent\": intent_ans.get(\"choice\") or \"\",\n            \"confidence\": intent_ans.get(\"confidence\", 0.0),\n            \"probabilities\": intent_ans.get(\"probabilities\") or {},\n            \"needs_tool\": (ans.get(\"needs_tool\") or {}).get(\"noul\", 0.0),\n            \"effort\": (ans.get(\"effort\") or {}).get(\"score\", 0.0),\n            \"engine\": \"jev\",\n            \"model\": resp.get(\"model\", \"\"),\n        }\n    except JudgeUnavailable:\n        # 没配 Jev：用普通模型做同样的判断，保证节点照样能跑\n        fallback = ctx.json_prompt(\n            \"判断用户这句话属于哪个意图，并给出置信度。\",\n            schema={\"intent\": \"\", \"confidence\": 0.0, \"reason\": \"\"},\n            context=f\"可选意图：{intents}\\n用户输入：{ctx.text}\",\n        )\n        data = dict(fallback) if isinstance(fallback, dict) else {\"intent\": \"\", \"confidence\": 0.0}\n        data[\"engine\"] = \"llm\"\n\n    ctx.state[\"intent\"] = data.get(\"intent\") or \"\"\n    ctx.emit(\"intent\", data)\n    return data\n",
+        "language": "python",
+        "params": {
+          "intents": [
+            "闲聊「, 」查资料「, 」执行操作"
+          ]
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n3",
+      "type": "agent",
+      "position": {
+        "x": 760.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "router",
+        "label": "需要调插件吗？",
+        "name": "router_3",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：需要调插件吗？  (router_3)  类型：router\n# ═══════════════════════════════════════════════════════════════\n\ndef router_3(state: AgentState) -> dict:\n    \"\"\"需要调插件吗？ —— 按判别问题决定走 true 还是 false。\"\"\"\n    text = str(state.get(\"data\", \"\"))\n    question = \"是否需要调用外部插件？\"\n    verdict = llm.bind(temperature=0).invoke([\n        {\"role\": \"system\", \"content\": \"你只输出 true 或 false，不要解释。\"},\n        {\"role\": \"user\", \"content\": f\"判别问题：{question}\\n\\n待判内容：\\n{text}\\n\\n只回答 true 或 false。\"},\n    ]).content.strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(state.get(\"loop_count\") or 0) + 1\n    max_loops = 4\n    if rounds > max_loops and branch != \"false\":\n        branch = \"false\"\n        _emit({\"event\": \"log\", \"level\": \"warn\", \"node\": \"n3\", \"name\": \"router_3\",\n               \"message\": f\"已到循环上限 {max_loops} 次，强制走出口\"})\n    _emit({\"event\": \"route\", \"node\": \"n3\", \"name\": \"router_3\",\n           \"branch\": branch, \"reason\": _brief(verdict, 120)})\n    return {\"data\": text, \"route\": branch, \"loop_count\": rounds}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"条件路由：返回 \"true\" 或 \"false\" 决定走哪条出边。\"\"\"\n    question = ctx.params.get(\"question\") or \"该请求是否需要调用工具？\"\n    verdict = ctx.llm(\n        f\"判别问题：{question}\\n待判内容：{ctx.text}\\n只回答 true 或 false。\",\n        system=\"你只输出 true 或 false，不要解释。\",\n    ).strip().lower()\n    branch = \"true\" if verdict.startswith(\"true\") else \"false\"\n    rounds = int(ctx.state.get(\"loop_count\") or 0) + 1\n    max_loops = int(ctx.params.get(\"max_loops\", 0) or 0)\n    if branch == \"false\" and rounds > max_loops:\n        branch = \"true\"\n        ctx.log(f\"已到循环上限 {max_loops} 次，强制收敛\", \"warn\")\n    ctx.state[\"loop_count\"] = rounds\n    ctx.emit(\"route\", {\"branch\": branch})\n    return branch\n",
+        "language": "python",
+        "params": {
+          "question": "是否需要调用外部插件？"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n4",
+      "type": "agent",
+      "position": {
+        "x": 1140.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "tool",
+        "label": "插件 / 工作流",
+        "name": "tool_4",
+        "description": "自定义工具：执行节点里的 Python 逻辑。",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：插件 / 工作流  (tool_4)  类型：tool\n# ═══════════════════════════════════════════════════════════════\n\n@tool\ndef tool_4(query: str) -> str:\n    \"\"\"自定义工具：执行节点里的 Python 逻辑。\"\"\"\n    return f\"[tool_4] 尚未实现：{query}\"",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext, **kwargs):\n    \"\"\"工具节点：被 agent 节点调用时 kwargs 为模型给出的参数。\n\n    直接连在流程中时也会作为普通节点执行一次。\n    \"\"\"\n    query = kwargs.get(\"query\") or ctx.params.get(\"query\") or ctx.text\n    ctx.log(f\"tool 执行：{query}\")\n    # TODO: 在这里写真正的工具逻辑\n    return {\"tool\": ctx.params.get(\"name\", \"tool\"), \"query\": query, \"result\": \"\"}\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n5",
+      "type": "agent",
+      "position": {
+        "x": 1520.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "llm",
+        "label": "Bot 回复",
+        "name": "llm_5",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：Bot 回复  (llm_5)  类型：llm\n# ═══════════════════════════════════════════════════════════════\n\nLLM_5_PROMPT = ChatPromptTemplate.from_messages([\n    (\"system\", \"按人设口吻回答。\"),\n    (\"human\", \"{input}\"),\n])\n\ndef llm_5(state: AgentState) -> dict:\n    \"\"\"Bot 回复\"\"\"\n    model = llm.bind(temperature=0.3)\n    text = _stream(model, LLM_5_PROMPT.format_messages(input=state.get(\"data\", \"\")),\n                   \"n5\", \"llm_5\")\n    return {\"data\": text}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": true,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"单次大模型推理。\"\"\"\n    system = ctx.params.get(\"system\") or \"你是一个严谨的助手，回答要准确、可执行。\"\n    return ctx.llm(ctx.text, system=system)\n",
+        "language": "python",
+        "params": {
+          "system": "按人设口吻回答。"
+        },
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    },
+    {
+      "id": "n6",
+      "type": "agent",
+      "position": {
+        "x": 1900.0,
+        "y": 0.0
+      },
+      "data": {
+        "kind": "output",
+        "label": "输出",
+        "name": "output_6",
+        "description": "",
+        "code": "# ═══════════════════════════════════════════════════════════════\n# 节点：输出  (output_6)  类型：output\n# ═══════════════════════════════════════════════════════════════\n\ndef output_6(state: AgentState) -> dict:\n    \"\"\"输出 —— 智能体的出口，把结果交给调用方。\"\"\"\n    source = \"auto\"\n    if source == \"data\":\n        return {\"data\": state.get(\"data\", \"\")}\n    if source in (\"answer\", \"agent\", \"auto\"):\n        answer = state.get(\"answer\")\n        if answer not in (None, \"\"):\n            return {\"data\": answer}\n        if source == \"answer\":\n            return {\"data\": \"\"}\n    for item in reversed(list(state.get(\"trace\") or [])):\n        if item.get(\"node\") == source or item.get(\"kind\") == source:\n            return {\"data\": item.get(\"output\", \"\")}\n    return {\"data\": state.get(\"data\", \"\")}",
+        "code_touched": false,
+        "code_generated": true,
+        "uses_llm": false,
+        "preview_code": "from runtime_sdk import NodeContext\n\n\ndef run(ctx: NodeContext):\n    \"\"\"出口：终止流程并返回最终答案给用户。\"\"\"\n    source = ctx.params.get(\"source\", \"auto\")\n    answer = ctx.text\n    if source in (\"auto\", \"agent\"):\n        # auto：链路里出现过 agent 就优先返回它的回答，避免被下游格式化节点覆盖\n        answer = ctx.state.get(\"answer\") or ctx.text\n    ctx.emit(\"final\", {\"answer\": answer})\n    return answer\n",
+        "language": "python",
+        "params": {},
+        "status": "idle",
+        "org": {},
+        "model": null
+      },
+      "width": null,
+      "height": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0_1_0",
+      "source": "n1",
+      "target": "n2",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e1_2_1",
+      "source": "n2",
+      "target": "n3",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e2_3_2",
+      "source": "n3",
+      "target": "n4",
+      "sourceHandle": "true",
+      "targetHandle": "in",
+      "label": "true",
+      "data": {
+        "branch": "true"
+      }
+    },
+    {
+      "id": "e2_4_3",
+      "source": "n3",
+      "target": "n5",
+      "sourceHandle": "false",
+      "targetHandle": "in",
+      "label": "false",
+      "data": {
+        "branch": "false"
+      }
+    },
+    {
+      "id": "e3_4_4",
+      "source": "n4",
+      "target": "n5",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    },
+    {
+      "id": "e4_5_5",
+      "source": "n5",
+      "target": "n6",
+      "sourceHandle": "out",
+      "targetHandle": "in",
+      "label": null,
+      "data": {
+        "branch": null
+      }
+    }
+  ],
+  "viewport": {
+    "x": 0.0,
+    "y": 0.0,
+    "zoom": 0.62
+  },
+  "background": {
+    "color": "#f8fafc",
+    "image": "",
+    "image_fit": "cover",
+    "image_opacity": 1.0,
+    "grid": true,
+    "grid_color": "#c9d1de"
+  },
+  "service": {}
+}
